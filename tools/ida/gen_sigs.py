@@ -77,10 +77,31 @@ def text_section():
 
 # ------------------------------------------------------------------ the parser
 
+def image_range():
+    """[lo, hi) of the loaded image, read from the database.
+
+    This used to be IMAGEBASE + a hardcoded 0x156B000, which is the one
+    constant in this script that a game update invalidates -- and it fails
+    QUIETLY: too small an upper bound stops recognising in-image immediates,
+    so a hardcoded address is baked into a pattern as literal bytes instead of
+    being wildcarded, and the signature then breaks on the NEXT rebuild for a
+    reason nobody can see. Derived, it cannot drift.
+    """
+    hi = IMAGEBASE
+    for i in range(ida_segment.get_segm_qty()):
+        s = ida_segment.getnseg(i)
+        if s:
+            hi = max(hi, s.end_ea)
+    return IMAGEBASE, hi
+
+
+IMG_LO, IMG_HI = image_range()
+
+
 def operand_masks(insn, ln):
     """byte offsets within the instruction that must become wildcards."""
     out = set()
-    img_lo, img_hi = IMAGEBASE, IMAGEBASE + 0x156B000
+    img_lo, img_hi = IMG_LO, IMG_HI
 
     for op in insn.ops:
         if op.type == ida_ua.o_void:
@@ -234,6 +255,27 @@ def read_targets():
     return targets, calls
 
 
+# The data targets live in the header as loose constants rather than in a
+# table, and used to be duplicated as a literal list down in this file. That
+# is exactly the drift this script's own docstring promises cannot happen --
+# and it DID: after the 2026-09-05 update the header had been migrated and the
+# generator was still emitting the previous build's three globals, reporting
+# them as failures against addresses nothing used any more. Read them from the
+# one place that owns them.
+DATA_CONSTS = ["kRva_MewDirectorPtr", "kRva_MouseCache", "kRva_ApplicationBase"]
+
+
+def read_data_targets():
+    src = open(HEADER, "r", encoding="utf-8", errors="replace").read()
+    out = []
+    for c in DATA_CONSTS:
+        m = re.search(r"\b%s\s*=\s*0x([0-9A-Fa-f]+)" % c, src)
+        if not m:
+            raise RuntimeError("%s not found in %s" % (c, HEADER))
+        out.append((int(m.group(1), 16), c[len("kRva_"):]))
+    return out
+
+
 # ----------------------------------------------------- DATA: resolve by xref
 #
 # A global cannot be scanned for -- its bytes are runtime state. It is
@@ -304,23 +346,26 @@ def build_data_signature(data_ea, data_rva, name):
     return None
 
 
-DATA_TARGETS = [
-    (0x013D1970, "MewDirectorPtr"),
-    (0x012F2E80, "MouseCache"),
-    (0x013BB790, "ApplicationBase"),
-    # The three SDL_DYNAPI slots are DELIBERATELY not here. Every thunk in that
-    # table is `jmp cs:off_...` and every default stub shares one shape, so no
-    # byte pattern can tell one slot from its neighbour -- which is the exact
-    # trap CLAUDE.md records ("resolving by COUNTING table entries yielded a
-    # stub belonging to a neighbouring function, and the pinned-build check
-    # passed because every stub has the same prologue").
-    #
-    # They need the third mechanism instead: locate the real implementation by
-    # a unique code pattern (SDL_GL_SwapWindow's own error strings identify it),
-    # then find the one qword in .data holding that address. That is sound
-    # because the mod injects at FrameBegin, long after SDL_InitDynamicAPI has
-    # overwritten the table with real implementations.
-]
+DATA_TARGETS = read_data_targets()
+
+# The three SDL_DYNAPI slots are DELIBERATELY not among them. Every thunk in
+# that table is `jmp cs:off_...` and every default stub shares one shape, so no
+# byte pattern can tell one slot from its neighbour -- which is the exact trap
+# CLAUDE.md records ("resolving by COUNTING table entries yielded a stub
+# belonging to a neighbouring function, and the pinned-build check passed
+# because every stub has the same prologue"). Confirmed again on the
+# 2026-09-05 build: the SDL_GetWindowSize and SDL_GetWindowSizeInPixels stubs
+# are byte-identical for their first 24 bytes.
+#
+# They need the third mechanism instead: locate the real implementation by a
+# unique code pattern (SDL_GL_SwapWindow's own error strings identify it), then
+# find the one qword in .data holding that address. That is sound because the
+# mod injects at FrameBegin, long after SDL_InitDynamicAPI has overwritten the
+# table with real implementations.
+#
+# Until that exists the three stay hand-migrated in mgmp_addresses.h. On this
+# update all three moved by exactly +0x9000, decoded from each thunk's own
+# `jmp cs:off_...` operand -- never by counting.
 
 
 # ------------------------------------------------------------------- the drive

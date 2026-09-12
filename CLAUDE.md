@@ -58,14 +58,12 @@ exists to catch — and the fence caught nothing across 6327 suppressor calls an
 5. The peer pointer is resolution- and letterbox-independent but **not
    camera-independent** — a deliberate trade. Two peers with differently panned
    cameras point at different board positions; the tile reticle stays right.
-6. **Signature resolution has never run against an actually-updated build.** It
-   is verified against this one three ways (unit tests, an independent Python
-   check of the shipped PE, and the shipping resolver run over the real image
-   with every hint poisoned), but "the patterns still match after a recompile" is
-   a prediction, not a measurement. First thing to do after an update: run
-   `gen_sigs.py` on the new `.i64` and read its report — whatever it lists as
-   FAIL is the list a human has to look at. The **three SDL_DYNAPI slots are
-   still hardcoded** and will simply be wrong.
+6. ~~Signature resolution has never run against an actually-updated build.~~
+   **MEASURED 2026-09-12, and it worked** — see "Surviving an update, measured"
+   below. 51/51 code patterns from the previous build matched **uniquely** in the
+   new one; the prediction held. The **three SDL_DYNAPI slots are still
+   hardcoded** — they were hand-migrated, and the third mechanism that would
+   resolve them is still unwritten.
 7. **Reach, not correctness:** transport is direct-IP only, so a real session
    needs port forwarding at one end — `SteamNetworkingMessages002` is linked and
    unused, and there is no lobby API to move to. And **3–4 players has never been
@@ -117,13 +115,18 @@ directions — framing-level counting, not lost data.
 ## The binary
 
 - `Mewgenics.exe` (x64 PE) + `Mewgenics.exe.i64` (analyzed IDA db).
-- Imagebase `0x140000000`, image size `0x156B000`, 63358 functions.
-- SHA256 `c3a41e436a93fa58cd386ec46dad5c2a6f21a583d33c3a57a15a2604c726439e` —
+- Imagebase `0x140000000`, image size `0x1574000`, 63434 functions, linked
+  2026-09-05.
+- SHA256 `4127cd6a792ae528bca6f65a8873dd61789591937d87656c2b586a5e30eb77ea` —
   **every address in this file is pinned to this build.** Re-derive after any
   game update. **The MOD is not pinned**: it resolves all 54 of its addresses by
   unique byte signature and treats the pinned RVA as a hint, so a patch can move
   addresses without breaking it. The addresses *in this file* are still pinned,
   because a document cannot re-derive itself.
+- **The previous build was `c3a41e43…`, image size `0x156B000`, 63358
+  functions.** Every RVA in this file was rewritten for the current one on
+  2026-09-12; the *offsets* were spot-checked, not re-derived wholesale, so
+  treat an offset here as a claim about `c3a41e43…` that survived a sample.
 - Native C++, namespace `glaiel::`. No scripting VM.
 - SDL2 + FAudio. Config/data is GON (`GonObject`). UI/animation is a hand-written
   **Flash SWF player** with an AVM2 interpreter (`glaiel::swf::*`). Saves are
@@ -167,6 +170,12 @@ Local Python 3.13 is `python` (NOT `python3`).
   **This is the migration path after a game update**: open the new `.i64`, run
   it, rebuild. It reads the RVAs out of `mgmp_addresses.h` itself, so the two
   cannot drift apart.
+- **`ida/recover_symbols.py`** — rebuilds the `glaiel::` names in a fresh
+  database from the binary's own assert signatures and `_Func_impl_no_alloc`
+  vftables. Runs inside IDA. **Run it before `gen_sigs.py` after an update**: a
+  new `.i64` is a bare auto-analysis with zero `glaiel::` names, and every
+  investigation in this file assumes they are there. 922 names + 1244 lambda
+  bodies on this build. See "Recovering the symbols" for the two ways it lies.
 - **`verify_sigs.py`** — checks the generated table against the **shipped PE**
   with an independent implementation: every pattern unique in `.text`, at the
   RVA it claims, and every data displacement recovering the right address.
@@ -363,6 +372,61 @@ cat table differing on one row by `elem` alone.
 Two fixes: `read_cat_state` no longer calls `get_affecting_elements` for a
 departed cat (the fault source is removed rather than caught), and `state_hash`
 hashes **membership**, then stops for that cat.
+
+### OFF THE BOARD is not the same state as DEPARTED, and conflating them cost a measurement
+
+The departed-cat work above keyed everything on **membership** — has this entry
+left the live character list. That covers the case it was found in and misses a
+commoner one: **a cat can be parked at the `(-5000,-5000)` sentinel while still
+being in the live list.** A cat that dies is put off the board first and drops
+out of the list only later.
+
+Measured 2026-09-12, the first two-peer run after the game update:
+
+```
+cat 33  ai  hp=0/2 tile=(-5000,-5000) DEAD [odd]  brain=glaiel::GenericBrain
+!! state hash OFF -- 45/45 cats linked, 44/45 in range
+turn 0 hash ... chars=45/45                 <- cat 33 still IN the live list
+turn 1 hash ... chars=44/45  ROSTER +0/-1   <- it leaves only afterwards
+```
+
+`plausible()` rejected the sentinel on `tx < -4096`, so **one** cat turned the
+state hash off for the entire battle, and the log blamed *"those Character
+offsets do not fit this build"* — an accusation against the very thing the
+session existed to test. Five turns then agreed on **`rng+queue` only**, which
+the `AGREES` lines reported honestly, and which is exactly the
+agreement-over-unmeasured-components case rule 3 exists for. Nobody watching the
+battle saw a cat "leave", which is why the report came back as *"my cats didn't
+go anywhere"* — and that was right.
+
+**The sentinel is the opposite of evidence about offsets: reading it proves the
+tile was read correctly.** It is now `off_board()`, and it is an exclusion in
+*two* places, because both hazards apply to a listed cat as much as a departed
+one:
+
+| | |
+|---|---|
+| `plausible()` | passes the sentinel outright, before the tile bounds |
+| `read_cat_state` | skips `get_affecting_elements` — the unbounded grid walk — on `in_battle && !off_board`, where it used to check only `in_battle` |
+
+That second one had never fired only because the first one kept the hash off.
+
+**Arming was also brought in line with the hash** while this was being chased —
+a separate, real inconsistency, though NOT the cause here. The snapshot's
+plausibility loop judged every entry as live, while the hash two hundred lines
+below stops at membership for a departed one. It now derives presence from the
+same `snapshot_membership`, counts `linked`/`sane` over **present** cats only,
+and prints `[GONE -- not in the live list]` plus a departed tally. A battle where
+every entry has departed still refuses to arm, because it proves nothing.
+
+**Two rules fall out, and both generalise:**
+
+- **A *validity* check and the *consumer* it guards must share one definition of
+  valid.** When they drift, the guard reports a fault in the thing it protects —
+  here, a sentinel tile read perfectly was reported as broken offsets.
+- **A sentinel value must be enumerated everywhere it can appear, not where it
+  was first seen.** "Departed" and "off the board" looked like one state for as
+  long as only one of them had been observed.
 
 **Detect roster change by MEMBERSHIP, never by length.** The old check was
 `live == g.cat_count`. A turn that appends a summon and removes something else
@@ -1889,6 +1953,110 @@ third mechanism, designed but not written: locate the real implementation by a
 unique pattern (its own error strings identify it), then find the single qword in
 `.data` holding that address. Sound because the mod injects at `FrameBegin`, long
 after `SDL_InitDynamicAPI` has overwritten the table.
+
+### Surviving an update — MEASURED, 2026-09-12
+
+The game updated (`c3a41e43…` → `4127cd6a…`, `SizeOfImage 0x156B000` →
+`0x1574000`, 63358 → 63434 functions, linked 2026-09-05). This is the event the
+whole resolver was built for, and it is no longer a prediction.
+
+**The design held completely.** Taking the OLD build's 51 code patterns and
+scanning the NEW `.text`:
+
+| | |
+|---|---|
+| matched **uniquely** | **51 / 51** — zero ambiguous, zero missing |
+| shifts | monotonically non-decreasing with RVA, `+0x50` … `+0xdaf0` |
+
+Monotonicity is the internal check that matters: a pattern that had matched
+something unrelated would break the ordering. Confirmed three further ways —
+every new RVA is a function START in the new database, `gen_sigs.py` regenerated
+all 54 from it, and `verify_sigs.py` then said `ALL PATTERNS VERIFIED` against
+the shipped PE. `test_resolve_live`: **54 resolved, 0 failed, 0 scans, 2.65 ms.**
+
+**The SDL slots all moved by exactly `+0x9000`** and were hand-migrated, decoded
+from each thunk's own `jmp cs:off_...` operand. The documented neighbouring-stub
+trap reproduced exactly: `SDL_GetWindowSize` and `SDL_GetWindowSizeInPixels`
+have **byte-identical first 24 bytes**, so a prologue check cannot separate them.
+
+| | thunk | slot RVA |
+|---|---|---|
+| `SDL_GL_SwapWindow` | `0x140BA5550` | `0x012E7650` |
+| `SDL_GetWindowSize` | `0x140BA6C90` | `0x012E8170` |
+| `SDL_GetWindowSizeInPixels` | `0x140BA6CA0` | `0x012E8178` |
+
+**Three things broke, and all three were bookkeeping rather than the mechanism.**
+
+1. **A `sizeof` immediate is build-variant and the generator keeps it.** The
+   `ApplicationBase` data pattern carried `mov ecx, 0F38h` — the allocation size.
+   The class grew to `0xF50`, so the pattern found nothing. The wildcard rule
+   covers in-image *addresses*, and a `sizeof` is neither that nor a struct
+   displacement. Left as-is deliberately (a refusal beats a mis-resolve), but
+   know that a class growing takes its own constructor's signature with it.
+2. **`gen_sigs.py`'s data targets were a hardcoded list**, contradicting its own
+   promise that the RVAs come from `mgmp_addresses.h` and "cannot drift apart".
+   They had drifted within one session of the header being migrated. Fixed —
+   read from the header, like the code targets always were.
+3. **`gen_sigs.py` hardcoded the image size** for its in-image immediate test.
+   This fails *quietly*: too small a bound stops recognising an address, so it
+   is baked in as literal bytes and breaks on the NEXT rebuild. Now derived from
+   the segments.
+
+**`kExpectedSizeOfImage` was the non-event it was designed to be** — a log line,
+not a refusal, exactly as the note about `hooks_verify_module` intended.
+
+**The offsets were then measured too, and they survived.** `sizeof(ApplicationBase)`
+grew by `0x18`, so at least one class was re-laid-out and none of this could be
+assumed. Two peers, 8 turns, `AGREES (rng+queue+state)` on every one, state hash
+byte-identical across two processes with different heap layouts:
+
+```
+state hash ON -- all 45 live cat(s) linked and in range
+turn 0 hash rng=d0ce040e7946cc95 state=3b333a6fe80f5fbf
+turn 7 hash rng=e7d39c87d9dff103 state=feedea0ca0895313
+8 turn hash(es) compared and agreed,  0 desync(s)
+```
+
+That covers HP, shield, max HP, dead, tile, the `Character` ⇄ `TacticsObject`
+round trip and `ElementList` — a wrong offset in any of them is a *guaranteed*
+false desync on turn 1, so agreement is the proof. `TurnAction`'s layout is
+covered separately by the `APPLY`/`DOACTION`/`TRIGGER` stream decoding sensibly,
+and `SaveSelection+0x38` by the slot names printing. The cursor pair is unmoved:
+`sub_1409BE3A0` still writes `ApplicationBase+3424` (shown) and copies the state
+string into `+3392`, so that class grew in the tail past `+0xD70`.
+
+**Still NOT re-read:** every offset this document records that no live path
+exercises — the `MewDirector` tail, `WorldEvent`, `Inventory`'s buckets, the
+`PlayerBrain` aim fields, `Button`, the scene list. They are claims about the
+previous build that happened to keep working, not measurements on this one.
+
+### Recovering the symbols — `tools/ida/recover_symbols.py`
+
+**The names live in the BINARY, not in the `.i64`.** An update replaces the
+database, and the symbol-recovery section above described the method in prose
+only, so the first update meant redoing it by hand. It is now a script: open the
+new `.i64`, run it, then `gen_sigs.py`.
+
+Yield on this build: **922 exact function names + 1244 lambda bodies**, 220 left
+alone as ambiguous. Channel 1 found 198 assert signatures, channel 2 found 1501
+usable `_Func_impl_no_alloc` vftables.
+
+**Both channels are corrupted by INLINING, and the discriminator is fan-out.** A
+real name lands in exactly one function; an inlined utility lands in many
+(`glaiel::ByteStream::read`'s assert appears inside every function that inlined
+it). So the candidate with the smallest fan-out wins and an exact tie is skipped.
+
+**OUTLINING is a third failure mode and fan-out does NOT catch it**, because the
+wrong attribution is unique. MSVC splits a cold chunk into its own callee and the
+chunk keeps the parent's lambda scope. Measured: `LevelUpScreen::select_option`
+landed on `0x140386610`, a 738-byte *callee* of the real one at `0x1403835D0` —
+which is the function the button-click lambda calls and which reads
+`LevelUpScreen+160`, the subject `CatData*`, **eighteen times**. Channel 2 also
+attributed `Ability::QueueEnableSuperArmor` to the 7831-byte `Ability::trigger`
+for the same reason, and channel 1's assert string settled it.
+
+**So a recovered name is NAVIGATIONAL, not authoritative.** Nothing the mod hooks
+comes from one. Treat it as a lead requiring the usual second reading.
 
 ### Hook points
 

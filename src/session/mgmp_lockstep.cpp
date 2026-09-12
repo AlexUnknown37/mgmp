@@ -315,13 +315,32 @@ uint64_t fnv1a(const void* p, size_t n, uint64_t h = 1469598103934665603ULL) {
 }
 
 
+// A cat the game has taken OFF THE BOARD sits at this exact tile. It is a
+// game constant, not a stray value -- see the departed-cats section in
+// CLAUDE.md, where it is also the address that makes get_affecting_elements
+// walk the grid out of bounds.
+const int kTileOffBoard = -5000;
+
+bool off_board(const CatState& c) {
+    return c.linked && c.tx == kTileOffBoard && c.ty == kTileOffBoard;
+}
+
 // Wildly-out-of-range values mean the offsets are wrong on this build, not that
 // a cat is unusual. Bounds are loose on purpose: they are here to catch reading
 // a pointer or a float as an int, not to police game balance.
+//
+// THE OFF-BOARD SENTINEL IS A PASS, and leaving it out cost a measurement.
+// On 2026-09-12 a battle opened with one dead cat already parked at
+// (-5000,-5000) while still in the live character list -- so the departed-cat
+// path did not cover it -- and the tile bound below rejected it. One cat, and
+// the state hash was off for the whole battle while the log blamed "those
+// Character offsets do not fit this build". The sentinel is the opposite of
+// evidence about offsets: reading it proves the tile was read correctly.
 bool plausible(const CatState& c) {
     if (c.maxhp <= 0 || c.maxhp > 100000) return false;
     if (c.hp < -100000 || c.hp > 100000)  return false;
     if (c.shield < -100000 || c.shield > 100000) return false;
+    if (off_board(c)) return true;
     if (c.tx < -4096 || c.tx > 4096 || c.ty < -4096 || c.ty > 4096) return false;
     return true;
 }
@@ -388,8 +407,17 @@ bool read_cat_state(const void* chr, CatState& out, bool in_battle = true) {
     // mem_read cannot help us. A cat that fails leaves elems = 0, which hashes
     // differently from a cat that succeeded and read zero -- the same
     // distinction `linked` makes, and for the same reason.
+    //
+    // OFF-BOARD IS THE SECOND EXCLUSION, and it is the same hazard as a
+    // departed cat rather than a milder one. get_affecting_elements feeds the
+    // raw tile to a grid walk with no bounds check, so at (-5000,-5000) the
+    // result is whatever the heap holds -- measured as one peer reading
+    // 0x00000400 while the other faulted, and the two SWAPPING roles on the
+    // next run. `in_battle` does not cover it: a cat can be parked off the
+    // board and still be in the live character list, which is exactly the
+    // battle that exposed this.
     uint32_t el[2] = { 0, 0 };
-    if (in_battle && read_affecting_elements(chr, el)) {
+    if (in_battle && !off_board(out) && read_affecting_elements(chr, el)) {
         out.e0 = el[0];
         out.e1 = el[1];
         out.elems = 1;
@@ -825,25 +853,64 @@ void snapshot_cats(void* turn_control) {
              g.cat_count, g.humans, local,
              cfg.net_control_auto ? "auto split" : "net_control list");
 
-    uint32_t linked = 0, sane = 0;
+    // A cat can already be OUT of the live character list at battle start --
+    // dead, or parked off the board at the (-5000,-5000) sentinel. The hash
+    // path knows this and stops at membership for such an entry, because every
+    // field behind it is heap luck rather than game state. THIS loop used to
+    // not know it, and judged a departed cat by the same standard as a live
+    // one: the sentinel fails plausible() on tx < -4096, so ONE legitimately
+    // departed cat turned the state hash off for the whole battle and blamed
+    // "Character offsets do not fit this build" for it.
+    //
+    // Measured 2026-09-12: a 45-cat fight opened with cat 33 dead at the
+    // sentinel, 45/45 linked, 44/45 "in range", state hash off for five turns.
+    // Both peers then agreed on rng+queue only -- which the AGREES lines said
+    // honestly, and which is exactly the "agreement over unmeasured components"
+    // rule 3 warns about.
+    //
+    // So judge presence the same way the hash does, from the same helper.
+    uint32_t live_now = 0, appeared_now = 0;
+    bool still_in[kMaxCats];
+    const bool have_membership =
+        snapshot_membership(g.snapped_list, live_now, still_in, appeared_now);
+
+    uint32_t linked = 0, sane = 0, present_n = 0, departed_n = 0;
     for (uint32_t i = 0; i < g.cat_count; ++i) {
         const char* who = !g.human_cat[i] ? "ai    "
                         : g.local_cat[i]  ? "LOCAL "
                                           : "peer  ";
+        const bool present = !have_membership || still_in[i];
         CatState st{};
-        bool got = read_cat_state(g.cats[i], st);
-        if (got && st.linked)     ++linked;
-        if (got && plausible(st)) ++sane;
+        bool got = read_cat_state(g.cats[i], st, present);
+
+        if (present) {
+            ++present_n;
+            if (got && st.linked)     ++linked;
+            if (got && plausible(st)) ++sane;
+        } else {
+            ++departed_n;
+        }
 
         if (got)
-            log_line("LOCKSTEP", "  cat %2u  %s  hp=%d/%d tile=(%d,%d)%s%s%s  brain=%s",
+            log_line("LOCKSTEP", "  cat %2u  %s  hp=%d/%d tile=(%d,%d)%s%s%s%s  brain=%s",
                      i, who, st.hp, st.maxhp, st.tx, st.ty,
                      st.dead ? " DEAD" : "",
-                     st.linked      ? "" : " [unlinked]",
-                     plausible(st)  ? "" : " [odd]", bcls[i]);
+                     !present  ? " [GONE -- not in the live list]"
+                   : off_board(st) ? " [off-board -- elements not read]" : "",
+                     (present && !st.linked)     ? " [unlinked]" : "",
+                     (present && !plausible(st)) ? " [odd]"      : "", bcls[i]);
         else
-            log_line("LOCKSTEP", "  cat %2u  %s  <state unreadable>  brain=%s", i, who, bcls[i]);
+            log_line("LOCKSTEP", "  cat %2u  %s  <state unreadable>%s  brain=%s", i, who,
+                     !present ? " [GONE -- not in the live list]" : "", bcls[i]);
     }
+    if (departed_n)
+        log_line("LOCKSTEP", "  %u of %u snapshot entr%s already out of the live list"
+                             " -- hashed by MEMBERSHIP only, and not held against the"
+                             " offsets", departed_n, g.cat_count,
+                 departed_n == 1 ? "y is" : "ies are");
+    if (!have_membership)
+        log_line("LOCKSTEP", "  membership unreadable -- every entry judged as present,"
+                             " which is the strict reading");
 
     // --- is the state hash trustworthy on this build? ------------------
     //
@@ -855,22 +922,29 @@ void snapshot_cats(void* turn_control) {
     // since heap layout differs between processes, that is a guaranteed false
     // desync on turn 1, which is strictly worse than no state hash at all.
     //
-    // Strict on purpose: every cat must pass, not most of them. A partial pass
-    // is precisely the ambiguous case, and the roster above marks each failing
-    // cat [unlinked] or [odd], so relaxing this later is a one-line edit made
-    // with the data in hand rather than a guess made now.
-    g.state_hash_on = tune::kStateHash && g.cat_count > 0 &&
-                      linked == g.cat_count && sane == g.cat_count;
+    // Strict on purpose: every PRESENT cat must pass, not most of them. A
+    // partial pass is precisely the ambiguous case, and the roster above marks
+    // each failing cat [unlinked] or [odd].
+    //
+    // Departed entries are excluded from the denominator rather than required
+    // to pass, because their fields are not evidence about this build either
+    // way -- that is the same judgement the hash makes two hundred lines below,
+    // and the two must not disagree about the same cat. A battle where EVERY
+    // entry has departed proves nothing, so it does not arm.
+    g.state_hash_on = tune::kStateHash && present_n > 0 &&
+                      linked == present_n && sane == present_n;
     if (!tune::kStateHash)
         log_line("LOCKSTEP", "state hash disabled by net_state_hash = 0");
     else if (g.state_hash_on)
-        log_line("LOCKSTEP", "state hash ON -- all %u cats linked and in range", g.cat_count);
+        log_line("LOCKSTEP", "state hash ON -- all %u live cat(s) linked and in range"
+                             " (%u departed, hashed by membership)",
+                 present_n, departed_n);
     else
-        log_line("LOCKSTEP", "!! state hash OFF -- %u/%u cats linked, %u/%u in range."
+        log_line("LOCKSTEP", "!! state hash OFF -- %u/%u live cats linked, %u/%u in range."
                              " Look for [unlinked] / [odd] in the roster above: those"
                              " Character offsets do not fit this build, and hashing"
                              " them would desync both peers over unrelated bytes",
-                 linked, g.cat_count, sane, g.cat_count);
+                 linked, present_n, sane, present_n);
 
     if (g.humans == 0)
         log_line("LOCKSTEP", "!! no human-driven cats in this battle -- lockstep has"

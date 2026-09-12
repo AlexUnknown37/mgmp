@@ -1,9 +1,9 @@
 // mgmp_addresses.h -- hook targets, pinned to one exact build.
 //
 //   Mewgenics.exe
-//   SHA256      c3a41e436a93fa58cd386ec46dad5c2a6f21a583d33c3a57a15a2604c726439e
+//   SHA256      4127cd6a792ae528bca6f65a8873dd61789591937d87656c2b586a5e30eb77ea
 //   imagebase   0x140000000
-//   SizeOfImage 0x156B000
+//   SizeOfImage 0x1574000
 //
 // Every RVA below was read out of Mewgenics.exe.i64 for that build. The 16-byte
 // prologue signature is the guard: if the bytes at an RVA don't match, the build
@@ -87,46 +87,46 @@ struct TargetDesc {
 
 // Order must match enum Target.
 static const TargetDesc kTargets[T_COUNT] = {
-    { 0x009A7890, "INIT",     "glaiel::ApplicationBase::initSystems" },
+    { 0x009B5380, "INIT",     "glaiel::ApplicationBase::initSystems" },
 
-    { 0x008E0010, "NEXTTURN", "glaiel::TurnControl::NextTurn" },
+    { 0x008E3C60, "NEXTTURN", "glaiel::TurnControl::NextTurn" },
 
-    { 0x00137B70, "CHOICE",   "glaiel::Brain::GetChoice" },
+    { 0x00138590, "CHOICE",   "glaiel::Brain::GetChoice" },
 
-    { 0x0010DB40, "DOACTION", "glaiel::Character::DoAction" },
+    { 0x0010E550, "DOACTION", "glaiel::Character::DoAction" },
 
-    { 0x00032050, "TRIGGER",  "glaiel::Ability::trigger" },
+    { 0x000320A0, "TRIGGER",  "glaiel::Ability::trigger" },
 
-    { 0x00109FA0, "BEGINTURN","glaiel::Character::BeginTurn" },
+    { 0x0010A9B0, "BEGINTURN","glaiel::Character::BeginTurn" },
 
-    { 0x0010B250, "ENDTURN",  "glaiel::Character::EndTurn" },
+    { 0x0010BC60, "ENDTURN",  "glaiel::Character::EndTurn" },
 
     // Hot: one call per frame. Off by default, throttled by frame_log_every.
     // Kept because it is the cheapest end-to-end proof that the hook path works
     // without having to reach a battle, and because a frame fence is on the
     // roadmap anyway.
-    { 0x009A9D80, "FRAME",    "glaiel::ApplicationBase::FrameBegin" },
+    { 0x009B7870, "FRAME",    "glaiel::ApplicationBase::FrameBegin" },
 
     // The command boundary. Every decision -- ability use, end turn, and the
     // std::function kind -- is queued by TurnControl::QueueDecision and lands
     // here exactly once. Character::DoAction only sees the ability case, which
     // is why an end-turn does not show up there.
-    { 0x008E1190, "APPLY",    "glaiel::TurnControl::ApplyTurnAction" },
+    { 0x008E4DE0, "APPLY",    "glaiel::TurnControl::ApplyTurnAction" },
 
     // Where deferred reactions enter the ring. 54 callers, all of them passive/
     // status callbacks -- the return address recorded here names which one, and
     // a type-6 or type-7 that appears in one run and not another is the earliest
     // available desync signal.
-    { 0x008DFC20, "QUEUE",    "glaiel::TurnControl::QueueDecision" },
+    { 0x008E3870, "QUEUE",    "glaiel::TurnControl::QueueDecision" },
 
     // The three xoshiro256 entry points. These are the hot ones -- see
     // mgmp_rng.h for the ABI, the TLS global-stream filter, and the important
     // caveat that inlined draw sites are invisible to them.
-    { 0x0094B0B0, "RANDINT",  "randint(int, u64*)" },
+    { 0x0094F340, "RANDINT",  "randint(int, u64*)" },
 
-    { 0x00158B80, "RANDFLT",  "randfloat(double, u64*)" },
+    { 0x001595A0, "RANDFLT",  "randfloat(double, u64*)" },
 
-    { 0x0094B230, "RAND2",    "rand2(double, u64*)" },
+    { 0x0094F4C0, "RAND2",    "rand2(double, u64*)" },
 
     // glaiel::RollChance(double p, double scale, u64* state) -- THE proc/crit
     // gate, and the fourth RNG entry point. It calls rand2, which calls
@@ -143,7 +143,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     //
     // Takes NO draw when p >= 1.0, so stream position depends on which procs
     // were POSSIBLE, not merely which fired -- both peers must agree on that.
-    { 0x0094B550, "ROLL",     "glaiel::RollChance(double,double,u64*)" },
+    { 0x0094F7E0, "ROLL",     "glaiel::RollChance(double,double,u64*)" },
 
     // glaiel::MapScreen::update -- virtual-only (0 code xrefs; its two data
     // xrefs are one vftable at 0x140F0D100 and .pdata), 0x1B9E bytes and
@@ -153,7 +153,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // host's node choice -- the native call arrives from a UI callback fired
     // inside this same update, so injecting here is a few frames later at the
     // same point in the frame rather than from an unrelated thread.
-    { 0x0038E7D0, "MAPUPD",   "glaiel::MapScreen::update" },
+    { 0x0038F3A0, "MAPUPD",   "glaiel::MapScreen::update" },
 
     // glaiel::MapScreen::EnterNode(MapScreen*, MapNode*) -- THE META-LAYER
     // COMMAND BOUNDARY, and the reason the map half of phase 5 is tractable at
@@ -176,7 +176,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // SDL_GetScancodeFromKey(SDLK_LSHIFT) and, if shift is down, tail-call
     // sub_1403923F0 instead. That is local keyboard state inside a command
     // boundary, so a client holding shift takes a different path than the host.
-    { 0x00391050, "ENTERNODE","glaiel::MapScreen::EnterNode(MapScreen*,MapNode*)" },
+    { 0x00391C20, "ENTERNODE","glaiel::MapScreen::EnterNode(MapScreen*,MapNode*)" },
 
     // glaiel::SaveSelection::update -- virtual (its only .rdata xref is slot 10
     // of the SaveSelection vftable at 0x140EDFD38; everything else is .pdata),
@@ -185,7 +185,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // clicked anything, and its tail is where the client's slot choice is
     // injected -- the native click arrives from a Button callback fired inside
     // this same update, so injecting here is the same point in the frame.
-    { 0x001BAD60, "SAVESEL",  "glaiel::SaveSelection::update" },
+    { 0x001BB780, "SAVESEL",  "glaiel::SaveSelection::update" },
 
     // sub_1401BCE90 -- THE SAVE-FILE COMMAND BOUNDARY, and the counterpart of
     // MapScreen::EnterNode one screen earlier:
@@ -216,7 +216,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // finally opens one. Calling this function with a slot index IS clicking
     // that slot, which is how the client is put on the host's save without a
     // human touching the screen.
-    { 0x001BCE90, "SAVESLOT", "glaiel::SaveSelection::ContinueSlot(int,bool)" },
+    { 0x001BD8B0, "SAVESLOT", "glaiel::SaveSelection::ContinueSlot(int,bool)" },
 
     // glaiel::MewDirector::init(std::string) -- the function that finally opens
     // a save file, reached only as CreateMewDirector(scene, parent, &name) from
@@ -237,7 +237,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // host's run is written to a filename the game otherwise never uses, and
     // this redirects the load to it, instead of overwriting whichever
     // steamcampaignNN.sav the host happened to be playing.
-    { 0x003A5FC0, "MEWDIR",   "glaiel::MewDirector::init(std::string)" },
+    { 0x003A6B90, "MEWDIR",   "glaiel::MewDirector::init(std::string)" },
 
     // sub_14022C4D0 -- MewSaveFile::Store(std::string key, ByteStream&). The
     // bottom of the inventory WRITE path:
@@ -257,7 +257,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // MewDirector::init takes its filename. Suppressing the call therefore
     // means destroying that string ourselves or leaking 32 bytes of the GAME's
     // heap per bucket per push -- which is what C_GameStrDtor is for.
-    { 0x0022C4D0, "SFSTORE",  "glaiel::MewSaveFile::Store(std::string,ByteStream&)" },
+    { 0x0022CF40, "SFSTORE",  "glaiel::MewSaveFile::Store(std::string,ByteStream&)" },
 
     // sub_14022C620 -- the exact mirror, and the bottom of the READ path:
     //
@@ -277,7 +277,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // already relies on. A miss leaves the stream in write mode with length 0,
     // which sub_14022DDF0 correctly reads as "empty bucket", so supplying an
     // empty bucket needs nothing more than mode 0 and length 0.
-    { 0x0022C620, "SFLOAD",   "glaiel::MewSaveFile::Load(std::string,ByteStream&)" },
+    { 0x0022D090, "SFLOAD",   "glaiel::MewSaveFile::Load(std::string,ByteStream&)" },
 
     // sub_140817320 -- glaiel::StatusMenu::update, slot 11 of the StatusMenu
     // vftable at 0x141118CD8. THE BATTLE HUD TICK, and the only hook the peer
@@ -301,7 +301,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // Virtual-only and safe to splice: 14849 bytes, its sole .rdata xref is
     // that one vtable slot and everything else is .pdata unwind info, so it is
     // not ICF-folded with anything and is never called non-virtually.
-    { 0x00817320, "STATUSMENU", "glaiel::StatusMenu::update (slot 11)" },
+    { 0x0081AEE0, "STATUSMENU", "glaiel::StatusMenu::update (slot 11)" },
 
     // sub_140937F30 -- THE WORLD-EVENT COMMAND BOUNDARY. Three statements, and
     // the middle one IS the choice:
@@ -321,13 +321,13 @@ static const TargetDesc kTargets[T_COUNT] = {
     // NOTE the prologue is `mov rax, cs:qword_1413D1970` -- a 7-byte
     // RIP-relative load. MinHook relocates it into the trampoline correctly,
     // but it is the reason this signature does not look like the others.
-    { 0x00937F30, "EVTCHOICE","glaiel::WorldEvent option commit (sub_140937F30)" },
+    { 0x0093C1C0, "EVTCHOICE","glaiel::WorldEvent option commit (sub_140937F30)" },
 
     // glaiel::WorldEvent::update -- vtable slot 10, virtual-only (its only
     // .rdata xref is that slot). The client's apply tick: a CHOICE can arrive
     // before this peer's event screen exists, so it is held and applied from
     // here, where a live WorldEvent* is the `this` pointer.
-    { 0x009122C0, "EVTUPD",   "glaiel::WorldEvent::update (slot 10)" },
+    { 0x00916340, "EVTUPD",   "glaiel::WorldEvent::update (slot 10)" },
 
     // glaiel::LevelUpScreen::select_option(LevelUpOption) -- non-virtual, two
     // code callers, and BOTH of them are the button handlers
@@ -339,13 +339,13 @@ static const TargetDesc kTargets[T_COUNT] = {
     // The option arrives as a COPY, not a pointer into the array, so the host
     // recovers the index by matching content (type at +0, name at +200) rather
     // than by pointer arithmetic.
-    { 0x00382A00, "LVLSELECT","glaiel::LevelUpScreen::select_option(LevelUpOption)" },
+    { 0x003835D0, "LVLSELECT","glaiel::LevelUpScreen::select_option(LevelUpOption)" },
 
     // glaiel::LevelUpScreen::update -- vtable slot 9. LevelUpScreen has NO
     // update at the slot StatusMenu and WorldEvent use; slots 10/11/12 are all
     // the ICF-folded empty virtual, and slot 9 is the only per-frame body it
     // owns. Same job as EVTUPD: hold a CHOICE until there is a live screen.
-    { 0x00382640, "LVLUPD",   "glaiel::LevelUpScreen::update (slot 9)" },
+    { 0x00383210, "LVLUPD",   "glaiel::LevelUpScreen::update (slot 9)" },
 
 
     // sub_1408DD9C0 -- the save-scum penalty. Not a guess: the ONLY write it
@@ -360,7 +360,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // OFF BY DEFAULT, and deliberately so: this is the first hook in the
     // harness that changes behaviour instead of watching it, and a capture
     // taken with it on is not a capture of the shipped game.
-    { 0x008DD9C0, "SCUM",     "ApplySaveScumPenalty(RunState*, int)" },
+    { 0x008E1610, "SCUM",     "ApplySaveScumPenalty(RunState*, int)" },
 
     // glaiel::TimeDelayStatusApplication -- vtable slot 11 (the per-update
     // tick). This is the ONE place in the battle sim measured to advance on
@@ -397,7 +397,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     //   DbgBackgroundTransitionTest (test content)  delay .1     spawn + music
     //
     // OFF BY DEFAULT: the second hook in the harness that changes the game.
-    { 0x0024F1C0, "TDELAY",   "glaiel::TimeDelayStatusApplication::update (slot 11)" },
+    { 0x0024FC30, "TDELAY",   "glaiel::TimeDelayStatusApplication::update (slot 11)" },
 
     // sub_1402B12F0 -- glaiel::CombatMenu::update. THE ABILITY BAR'S TICK, and
     // the only place that knows both which cat the bar belongs to and which
@@ -414,7 +414,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     //
     // Non-virtual as far as we care (it is reached through its own vtable slot
     // and nothing else calls it), 5375 bytes, so it is not ICF-folded.
-    { 0x002B12F0, "COMBATMENU", "glaiel::CombatMenu::update" },
+    { 0x002B1DC0, "COMBATMENU", "glaiel::CombatMenu::update" },
 
     // sub_140975F00 -- glaiel::Button::update, slot 11 of the glaiel::Button
     // vftable at 0x140ED9E88 and the ONLY vtable it appears in (its four other
@@ -430,7 +430,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     // sub_1409767B0(button, true) and the bar renders "up" every frame. The
     // only point that sits between the recompute and the draw is the entry to
     // this function.
-    { 0x00975F00, "BUTTON",    "glaiel::Button::update (slot 11)" },
+    { 0x0097E330, "BUTTON",    "glaiel::Button::update (slot 11)" },
 
     // The aim preview turns the acting cat toward where it is being aimed, and
     // it does that by writing the SAME field the simulation reads. Exactly one
@@ -454,7 +454,7 @@ static const TargetDesc kTargets[T_COUNT] = {
     //
     // Brain+0x38 is read twice over here: this site, and 0x1401377D3 taking
     // [rdi+38h] -> +0x60 -> +0x48, which is Character -> TacticsObject -> tile.
-    { 0x001374D0, "PREVIEWFACE", "glaiel::Brain::UpdateDecision" },
+    { 0x00137EF0, "PREVIEWFACE", "glaiel::Brain::UpdateDecision" },
 
     // sub_140151CE0 -- the status half of the ability highlight, and the reason
     // sub_140138A10 is dangerous to call one-sidedly. Four call sites inside
@@ -467,11 +467,11 @@ static const TargetDesc kTargets[T_COUNT] = {
     // mgmp_aim has the highlight guard raised, which happens only around the
     // draw of ANOTHER player's aim, on the peer that does not own that cat.
     // Outside that window it is one predictable branch on a global.
-    { 0x00151CE0, "HILITE",    "ability highlight status refresh (sub_140151CE0)" },
+    { 0x00152700, "HILITE",    "ability highlight status refresh (sub_140151CE0)" },
 };
 
 // Coarse module guard, checked before the per-target signatures.
-static const uint32_t kExpectedSizeOfImage = 0x156B000;
+static const uint32_t kExpectedSizeOfImage = 0x1574000;
 
 // ---------------------------------------------------------------------------
 // Injection park point.
@@ -486,7 +486,7 @@ static const uint32_t kExpectedSizeOfImage = 0x156B000;
 // first call happens after all startup is done but before a single frame has
 // been simulated, which is early enough for every hook we care about. The only
 // thing that ordering costs is initSystems, which has already run by then.
-static const uint32_t kParkRva = 0x009A9D80;   // glaiel::ApplicationBase::FrameBegin
+static const uint32_t kParkRva = 0x009B7870;   // glaiel::ApplicationBase::FrameBegin
 static const uint8_t  kParkSig[16] = {
     0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x48,0x89,0x78,0x20,0x55
 };
@@ -579,13 +579,13 @@ struct CallDesc {
 
 // Order must match enum Call.
 static const CallDesc kCalls[C_COUNT] = {
-    { 0x0022E9A0, "SerializeCatData" },
+    { 0x0022F410, "SerializeCatData" },
     // `cmp byte ptr [rcx+20h], 0` right in the prologue -- the "owns the read
     // buffer" flag. Lending it our own buffer with that byte 0 is what keeps
     // the game from freeing memory we allocated on a different heap.
-    { 0x009B3130, "ByteStream::~ByteStream" },
-    { 0x0032D0A0, "std::ofstream::ofstream" },
-    { 0x000D6980, "CatData::by_id" },
+    { 0x009BF900, "ByteStream::~ByteStream" },
+    { 0x0032DC60, "std::ofstream::ofstream" },
+    { 0x000D7220, "CatData::by_id" },
 
     // sub_1402E15B0 / sub_1402E1740 -- one inventory bucket, out and in. These
     // are the two functions mgmp_invsync actually drives; everything below
@@ -595,18 +595,18 @@ static const CallDesc kCalls[C_COUNT] = {
     // First parameter is DEAD. The game's own calls pass whatever happened to
     // be in rcx -- one call site passes an uninitialised local, another passes
     // the literal 101 -- and the decompiled body never reads it. We pass null.
-    { 0x002E15B0, "Inventory::write_bucket" },
-    { 0x002E1740, "Inventory::read_bucket" },
+    { 0x002E20D0, "Inventory::write_bucket" },
+    { 0x002E2260, "Inventory::read_bucket" },
 
     // The game's string heap, needed because two of the three bucket keys are
     // longer than the 15-char MSVC small-string buffer ("inventory_backpack"
     // is 18, "inventory_storage" 17) and the callee destroys the key it is
     // given. A key allocated by OUR /MT CRT and freed by the game's is the
     // same two-heap bug ByteStream+0x20 exists to avoid, one layer up.
-    { 0x000529F0, "glaiel::str_alloc(size_t)" },
+    { 0x00052A40, "glaiel::str_alloc(size_t)" },
     // std::string::_Tidy_deallocate: frees only when capacity > 15, so calling
     // it on a small-string image is a no-op rather than a wrong free.
-    { 0x00052730, "std::string::_Tidy_deallocate" },
+    { 0x00052780, "std::string::_Tidy_deallocate" },
 
     // sub_14011A840 -- glaiel::Character::get_affecting_elements(ElementList& out).
     // The union of three sources, ORed together in this order:
@@ -624,7 +624,7 @@ static const CallDesc kCalls[C_COUNT] = {
     // get_standing_tile_elements is the whole proof of the tile half:
     //     out[0] |= *(u32*)(tile + 304);   // TacticsTile+0x130
     //     out[1] |= *(u32*)(tile + 308);   // TacticsTile+0x134
-    { 0x0011A840, "Character::get_affecting_elements" },
+    { 0x0011B250, "Character::get_affecting_elements" },
 
     // sub_14013C570 -- Component* -> ImmediateModeGameUI*. Generic: it only
     // touches Component+0x18 (the scene) and walks scene -> +32 -> +18080 to a
@@ -632,7 +632,7 @@ static const CallDesc kCalls[C_COUNT] = {
     // through the parent scene when this one has none. Brain and StatusMenu
     // both call it with `this`, which is why one accessor covers both.
     // Returns null off the battle screen; every caller must check.
-    { 0x0013C570, "Component::im_game_ui" },
+    { 0x0013CF90, "Component::im_game_ui" },
 
     // sub_14033FFD0 -- the immediate-mode "draw this sprite on that tile" call,
     // and the reason peer cursors need no components, no lifetimes and no
@@ -660,7 +660,7 @@ static const CallDesc kCalls[C_COUNT] = {
     // before returning. Keeping every name at 15 characters or fewer makes that
     // a no-op on a small-string image, which is why the ids below are short --
     // the same two-heap hazard mgmp_invsync handles with C_GameStrDtor.
-    { 0x0033FFD0, "ImmediateModeGameUI::tile_piece" },
+    { 0x00340B90, "ImmediateModeGameUI::tile_piece" },
     // sub_140386810 -- the LevelUpScreen button callback, called with a capture
     // of {vftable, LevelUpScreen*, int index}. We CALL it rather than
     // reimplementing select_option's argument, because it is the thing that
@@ -670,7 +670,7 @@ static const CallDesc kCalls[C_COUNT] = {
     //
     // Only two xrefs: one _Func_impl vftable and .pdata. It is never called
     // directly by the game, so there is no risk of colliding with a live caller.
-    { 0x00386810, "LevelUpScreen button click" },
+    { 0x003873E0, "LevelUpScreen button click" },
 
     // sub_1403B9CE0 -- "save the adventure", void(MewDirector*).
     //
@@ -699,7 +699,7 @@ static const CallDesc kCalls[C_COUNT] = {
     // there) is the first that differs. The signature resolver needs no special
     // case: its pattern is grown until it matches exactly once, so it either
     // names this function or resolves nothing at all.
-    { 0x003B9CE0, "MewDirector::save_adventure" },
+    { 0x003BABB0, "MewDirector::save_adventure" },
 
     // sub_1408DD2F0 -- the run history's serializer, void(RunHistory*,
     // ByteStream*), BIDIRECTIONAL in exactly the way SerializeCatData is: every
@@ -716,7 +716,7 @@ static const CallDesc kCalls[C_COUNT] = {
     // against Mewgenics.exe itself, not against IDA -- the rule save_adventure
     // taught, where a 16-byte guard would have happily accepted
     // ContinueAdventure.
-    { 0x008DD2F0, "RunHistory::serialize" },
+    { 0x008E0F40, "RunHistory::serialize" },
 
     // glaiel::Brain::DrawAbilityAOE -- the range / AOE / knockback tiles a
     // solo player sees while aiming. Immediate mode, so it must be called every
@@ -733,11 +733,11 @@ static const CallDesc kCalls[C_COUNT] = {
     //
     // Its own first instruction is `test rdx, rdx / jz` -- it null-checks the
     // Ability before touching it, which is one less thing for us to get wrong.
-    { 0x0013A030, "Brain::DrawAbilityAOE" },
+    { 0x0013AA50, "Brain::DrawAbilityAOE" },
 
     // sub_140138A10 -- the reachable/in-range tile highlight. THE TILES ARE A
     // SIDE EFFECT OF STATUSES; read the block below before calling it.
-    { 0x00138A10, "ability highlight (sub_140138A10)" },
+    { 0x00139430, "ability highlight (sub_140139430)" },
 
     // glaiel::TacticsObject::Move(iVec2D, bool, bool) and
     // glaiel::Character::recompute_stats(Ability*, bool) -- the two halves of
@@ -745,8 +745,8 @@ static const CallDesc kCalls[C_COUNT] = {
     // the game's own displacement at 0x14077738B / 0x1407773AD:
     //     rcx = TacticsObject*, rdx = iVec2D tile BY VALUE, r8b = 1, r9d = 0
     //     rcx = Character*,     edx = 0 (no ability),       r8b = 1
-    { 0x0082E520, "TacticsObject::Move" },
-    { 0x00101C60, "Character::recompute_stats" },
+    { 0x00832160, "TacticsObject::Move" },
+    { 0x00102520, "Character::recompute_stats" },
 
     // sub_1409764B0 -- glaiel::Button::Click(Button*, bool force).
     //
@@ -776,7 +776,7 @@ static const CallDesc kCalls[C_COUNT] = {
     //
     // The button is identified by the std::string at Button+504 (kBtn_Name),
     // never by pointer or by position in a panel.
-    { 0x009764B0, "glaiel::Button::Click" },
+    { 0x0097E8E0, "glaiel::Button::Click" },
 };
 
 // sub_140138A10 IS NOT A DRAW ROUTINE, and it is in the table above only
@@ -868,7 +868,7 @@ static const CallDesc kCalls[C_COUNT] = {
 // The MewDirector pointer VARIABLE (not the object). Data, so there is no
 // prologue to check -- mgmp_catsync validates it by reading through it and
 // refusing on anything implausible.
-constexpr uint32_t kRva_MewDirectorPtr = 0x013D1970;
+constexpr uint32_t kRva_MewDirectorPtr = 0x013DAC30;
 
 // Offsets into the MewDirector, all read off sub_1403B2060 and sub_140231180.
 constexpr uintptr_t kDir_CatRegistry = 1432;   // ptr, the id -> CatData* map
@@ -1056,7 +1056,7 @@ constexpr uintptr_t kBrain_Character = 0x38;
 // and deliberately reuses the stored value on frames where it does not ask --
 // so reading the cache is reading exactly the position the game is acting on,
 // which calling SDL again would not be.
-constexpr uint32_t kRva_MouseCache = 0x012F2E80;
+constexpr uint32_t kRva_MouseCache = 0x012FBE80;
 
 // SDL_GL_SwapWindow's slot in the SDL_DYNAPI JUMP TABLE, and the reason the
 // overlay does not use MinHook at all.
@@ -1079,7 +1079,7 @@ constexpr uint32_t kRva_MouseCache = 0x012F2E80;
 // Writing the slot is both simpler and more honest than hooking anything. It is
 // the indirection SDL_DYNAPI exists to provide, the table is in .data and
 // already writable, and "call the previous value" is the trampoline for free.
-constexpr uint32_t kRva_SdlSwapSlot = 0x012DE650;
+constexpr uint32_t kRva_SdlSwapSlot = 0x012E7650;
 
 // THE MOUSE AND THE VIEWPORT ARE NOT THE SAME RULER, and these two slots are
 // how the overlay finally stopped guessing at the conversion.
@@ -1117,8 +1117,8 @@ constexpr uint32_t kRva_SdlSwapSlot = 0x012DE650;
 //
 //   SDL_GetWindowSize          @ 0x140B9CF10   jmp cs:off_1412DF170
 //   SDL_GetWindowSizeInPixels  @ 0x140B9CF20   jmp cs:off_1412DF178
-constexpr uint32_t kRva_SdlGetWindowSizeSlot   = 0x012DF170;
-constexpr uint32_t kRva_SdlGetWindowSizePxSlot = 0x012DF178;
+constexpr uint32_t kRva_SdlGetWindowSizeSlot   = 0x012E8170;
+constexpr uint32_t kRva_SdlGetWindowSizePxSlot = 0x012E8178;
 
 // --- the game's own mouse cursor -------------------------------------------
 //
@@ -1136,7 +1136,7 @@ constexpr uint32_t kRva_SdlGetWindowSizePxSlot = 0x012DF178;
 // The shipped state names are exactly the file names in textures/cursor:
 // default, attack, spell, move, invalid, examine, question, grab, grabr, heal,
 // btn_over, pet_frame1..4, plus _hastargets variants of attack/spell/move/heal.
-constexpr uint32_t  kRva_ApplicationBase = 0x013BB790;   // ApplicationBase**
+constexpr uint32_t  kRva_ApplicationBase = 0x013C4A30;   // ApplicationBase**
 constexpr uintptr_t kApp_CursorState  = 3392;  // std::string, the state name
 constexpr uintptr_t kApp_CursorShown  = 3424;  // bool, cursor visible this frame
 

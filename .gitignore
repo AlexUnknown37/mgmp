@@ -51,6 +51,7 @@ mgmp.ini.bak
 Mewgenics.exe*
 
 /tools/ida/sigs_report.txt
+/tools/ida/symbols_report.txt
 
 /_*.txt
 /rng.txt
