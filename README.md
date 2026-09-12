@@ -57,7 +57,7 @@ What that means in practice:
 - **Mewgenics**, the same version on both machines, installed from the same
   place. If one of you has a different build of the game, the mod will notice
   and complain — that mismatch would eventually cause the two games to drift
-  apart. Currently supported `1.1 Build 21039`.
+  apart. Currently supported `1.1.21239`.
 - A way to reach each other over the network (see below).
 
 To build it yourself you also need **Visual Studio 2022/2026** (or just the MSVC
