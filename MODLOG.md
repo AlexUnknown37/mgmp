@@ -208,3 +208,15 @@ ever deleted** (by the mod, on either machine).
     (probably "start": goes to House/adventure). Other MewDirector::init callers: 0x31C1E0 (literal filename,
     callers 0x317230/0x317C50/0x318B50), 0x758650 (caller 0x750F90). Open question: how the old MewDirector is
     torn down (singleton) before a new one is made.
+- 2026-10-11: **Shared End Day (first cut).** End Day completion = lambda body 0x1EF4D0 (via _Func_impl vtable
+  0xEFC898 slot 2 -> 0x1F8E10 `add rcx,8; jmp`): collects cats, rolls the night (0x1E8B40), saves (0x3BDCF0),
+  marks the scene dying (+0x4DB), get-or-creates scene "House" (0x9D4950), AddComponent<House> (0x1F36D0),
+  then plays the event sequence (0x20E290/0x20DB30). So the game rebuilds the House in place every night.
+  - Design: host End Day -> MSG_ENDDAY {seed} (proto 29). Guest arms a one-shot allow and presses its own
+    'EndDay_Sign' Button via Button::Click from mgmp's Button::update hook (same as mgmp's auto-Play). Both
+    hook 0x1EF4D0 (pinned + 11 bytes checked) and set TLS+0x178 = splitmix64(seed) x4 on entry, then log the
+    stream after ("night done -- sim stream now X") for comparison. No menu trip; DayEnd save handoff no longer
+    triggered by the host's End Day.
+  - Known limit: identical nights need identical Houses at that moment. The guest's copy is the host's save as
+    of the last load, so host changes since then (moved cats, purchases) can make the nights differ. Next step:
+    ship the host's live cats/house/inventory with ENDDAY and apply before the roll.

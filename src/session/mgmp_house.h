@@ -43,6 +43,10 @@ void house_note_swap();
 // follow the host actually starts the quit-to-menu transition.
 void house_on_button_update(void* button);
 
+// Guest: the host ended the day (MSG_ENDDAY). Press our own End Day sign and
+// seed the night from `seed`.
+void house_on_end_day_message(uint64_t seed);
+
 // One line for the UI ("" when nothing to say): why a guest click was refused.
 const char* house_toast();
 

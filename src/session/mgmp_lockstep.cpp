@@ -17,6 +17,7 @@
 #include "mgmp_follow.h"
 #include "mgmp_choice.h"
 #include "mgmp_savefile.h"
+#include "mgmp_house.h"
 #include "mgmp_leave.h"
 #include "mgmp_session.h"
 #include "mgmp_ability.h"
@@ -2122,6 +2123,10 @@ void lockstep_pump() {
             // Our fork: the guest's Force Sync button.
             case MSG_SYNCREQ:
                 savefile_on_sync_request(m.from);
+                break;
+
+            case MSG_ENDDAY:
+                house_on_end_day_message(m.endday.seed);
                 break;
 
             // Not epoch-gated, and deliberately so: a cat is RUN state, not

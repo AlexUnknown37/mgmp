@@ -4,6 +4,8 @@
 #include "mgmp_addresses.h"
 #include "mgmp_resolve.h"
 #include "mgmp_rtti.h"
+#include "mgmp_rng.h"
+#include <intrin.h>
 #include "mgmp_mem.h"
 #include "mgmp_log.h"
 #include "mgmp_net.h"
@@ -124,6 +126,14 @@ struct House {
     bool     quit_wanted = false;   // unused since the direct quit was dropped
     bool     said_wait   = false;
 
+    // Shared End Day.
+    bool     end_day_pending = false;   // guest: press our sign at the next chance
+    uint64_t end_day_since   = 0;
+    bool     allow_end_day   = false;   // guest: let exactly one End Day through
+    bool     seed_armed      = false;   // set the sim stream at the night's rolls
+    uint64_t day_seed        = 0;
+    void (__fastcall* o_day_complete)(void*) = nullptr;
+
     // Button name + action seen, logged once each (discovery for the blocklist).
     char     seen[96][64] = {};
     uint32_t seen_count = 0;
@@ -201,12 +211,52 @@ uintptr_t function_naming(uintptr_t base, const char* literal) {
 
 void* __fastcall h_end_day(void* scene, void* a2, void* a3, void* a4) {
     if (is_guest()) {
-        set_toast("Only the host can end the day -- your day ends when theirs does.");
-        return nullptr;   // the game's own "scene is going away" result
+        if (!g.allow_end_day) {
+            set_toast("Only the host can end the day -- your day ends when theirs does.");
+            return nullptr;   // the game's own "scene is going away" result
+        }
+        g.allow_end_day = false;
+        log_line("HOUSE", "ending the day with the host");
+        return g.o_end_day(scene, a2, a3, a4);
     }
     void* r = g.o_end_day(scene, a2, a3, a4);
-    if (r && is_host()) savefile_on_end_day();
+    if (r && is_host()) {
+        // One seed for the night, used by both games when the events roll.
+        EndDayMsg m{};
+        m.seed = __rdtsc() ^ ((uint64_t)GetTickCount64() << 21) ^ (uint64_t)(uintptr_t)r;
+        g.day_seed   = m.seed;
+        g.seed_armed = true;
+        const bool sent = net_send_endday(m);
+        log_line("HOUSE", "ended the day -- night seed %016llx %s", (unsigned long long)m.seed,
+                 sent ? "sent to the guest" : "(NOT sent)");
+    }
     return r;
+}
+
+// splitmix64, the same mixer the game seeds its streams with.
+uint64_t splitmix(uint64_t& x) {
+    uint64_t z = (x += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+// The End Day completion (RVA 0x1EF4D0): rolls the night (0x1E8B40), saves,
+// rebuilds the House scene and plays the events. Both games set the simulation
+// stream from the shared seed on entry, so equal Houses roll equal nights.
+void __fastcall h_day_complete(void* cap) {
+    if (g.seed_armed) {
+        g.seed_armed = false;
+        if (uint64_t* st = rng_global_stream()) {
+            uint64_t x = g.day_seed;
+            for (int i = 0; i < 4; ++i) st[i] = splitmix(x);
+            log_line("HOUSE", "night rolls seeded from %016llx", (unsigned long long)g.day_seed);
+        }
+    }
+    g.o_day_complete(cap);
+    if (uint64_t* st = rng_global_stream())
+        log_line("HOUSE", "night done -- sim stream now %016llx (compare host and guest)",
+                 (unsigned long long)st[0]);
 }
 
 void* __fastcall h_depart(void* scene, void* a2, void* a3, void* a4) {
@@ -478,6 +528,14 @@ void house_install(uintptr_t base) {
     hook(function_naming(base, "DepartTransition"), (void*)&h_depart, (void**)&g.o_depart,
          "the Depart transition");
     hook(addr_of_call(C_ButtonClick), (void*)&h_click, (void**)&g.o_click, "Button::Click");
+    {
+        const uint8_t want[] = { 0x48, 0x89, 0x4C, 0x24, 0x08, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54 };
+        uint8_t got[sizeof(want)] = {};
+        const uintptr_t at = base + 0x1EF4D0;
+        const bool ok = resolve_is_pinned_build() && mem_read((const void*)at, got, sizeof(got)) &&
+                        memcmp(got, want, sizeof(want)) == 0;
+        hook(ok ? at : 0, (void*)&h_day_complete, (void**)&g.o_day_complete, "the End Day completion");
+    }
     hook(function_naming(base, "DrawerOpen_"), (void*)&h_drawer_open, (void**)&g.o_drawer_open,
          "the House drawer open");
     hook(function_naming(base, "DrawerClose_"), (void*)&h_drawer_close, (void**)&g.o_drawer_close,
@@ -487,11 +545,34 @@ void house_install(uintptr_t base) {
 void house_note_swap() { ++g.swaps; }
 
 void house_on_button_update(void* button) {
-    (void)button;
-    if (!g.quit_wanted) return;
-    g.quit_wanted = false;
-    if (!savefile_must_rejoin()) return;
-    if (fn_quit_to_menu quit = quit_to_menu_fn()) quit(nullptr);
+    if (!g.end_day_pending || !button || !g.o_click) return;
+    if (GetTickCount64() - g.end_day_since > 20000) {
+        g.end_day_pending = false;
+        log_line_lvl(LogLevel::Warn, "HOUSE", "!! could not press End Day for 20 s -- use Force Sync");
+        return;
+    }
+    char name[48] = {};
+    if (!mem_read_std_string((const uint8_t*)button + kButton_Name, name, sizeof(name))) return;
+    if (strcmp(name, "EndDay_Sign") != 0) return;
+    // A real click, from the same spot in the frame the game clicks from.
+    g.end_day_pending = false;
+    g.allow_end_day   = true;
+    log_line("HOUSE", "the host ended the day -- pressing our End Day sign");
+    g.o_click(button, false);
+    if (g.allow_end_day) {
+        // The click was refused (a menu open, the sign busy): try again.
+        g.allow_end_day   = false;
+        g.end_day_pending = true;
+    }
+}
+
+void house_on_end_day_message(uint64_t seed) {
+    if (!is_guest()) return;
+    g.day_seed        = seed;
+    g.seed_armed      = true;
+    g.end_day_pending = true;
+    g.end_day_since   = GetTickCount64();
+    log_line("HOUSE", "host ended the day (night seed %016llx)", (unsigned long long)seed);
 }
 
 void house_pump() {
