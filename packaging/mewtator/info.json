@@ -1,0 +1,8 @@
+{
+	"title":"Mewgenics Online",
+	"description":"Two-player co-op adventures over LAN (Steam join coming). The host plays their save; the joining player's own saves are never touched. Fork of mgmp by SanTertrust. Requires Mewjector and 'Enable DLL Mod Support' in Mewtator.",
+	"author":"AlexUnknown37 (fork of mgmp by SanTertrust)",
+	"version":"0.1.0",
+	"url":"https://github.com/AlexUnknown37/mgmp",
+	"requirements":[]
+}

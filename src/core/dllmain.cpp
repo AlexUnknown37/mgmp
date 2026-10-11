@@ -49,9 +49,51 @@ void compute_dll_dir(HMODULE self) {
     if (slash) *slash = 0;
 }
 
+struct FindWindowCtx { DWORD pid; bool found; };
+
+BOOL CALLBACK find_visible_window(HWND hwnd, LPARAM lp) {
+    auto* ctx = (FindWindowCtx*)lp;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == ctx->pid && IsWindowVisible(hwnd) && !GetWindow(hwnd, GW_OWNER)) {
+        ctx->found = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+// Loaded by Mewjector (version.dll proxy, normally via Mewtator's manifest) the
+// DLL arrives early in startup, before initSystems has run. mgmp_loader instead
+// parks the game at FrameBegin, and its --attach mode injects into a game that is
+// already up -- "the mod hooks nothing that runs before frame 1". So without the
+// loader we wait for the same moment: the game's top-level window is visible,
+// which only happens after SDL (and with it SDL_InitDynamicAPI, which rewrites
+// the jump table ui_init takes over) has initialised. The loader marks its own
+// launches with MGMP_LOADER=1 in the environment the game inherits.
+void wait_for_game_window() {
+    wchar_t flag[8] = {};
+    if (GetEnvironmentVariableW(L"MGMP_LOADER", flag, 8) > 0 && flag[0] == L'1') {
+        breadcrumb("init_thread: launched by mgmp_loader -- not waiting");
+        return;
+    }
+    FindWindowCtx ctx = {GetCurrentProcessId(), false};
+    const DWORD start = GetTickCount();
+    while (GetTickCount() - start < 120000) {
+        ctx.found = false;
+        EnumWindows(find_visible_window, (LPARAM)&ctx);
+        if (ctx.found) break;
+        Sleep(100);
+    }
+    breadcrumb(ctx.found ? "init_thread: game window is up"
+                         : "init_thread: no game window after 120 s -- continuing anyway");
+    // Give initSystems a moment to finish behind the window before hooking.
+    Sleep(1000);
+}
+
 DWORD WINAPI init_thread(LPVOID) {
     using namespace mgmp;
     breadcrumb("init_thread: running");
+    wait_for_game_window();
 
     config_load(g_dll_dir);
     breadcrumb("init_thread: config loaded");

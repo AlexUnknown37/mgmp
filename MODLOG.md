@@ -43,7 +43,8 @@ ever deleted** (by the mod, on either machine).
 
 ## Our plan
 1. [x] Fork, clone, build baseline (all 9 unit tests pass, 2026-10-11).
-2. [ ] Load as a Mewjector mod (DLL in `mods/`, managed by Mewtator) instead of the injector.
+2. [~] Load as a Mewjector mod (DLL in `mods/`, managed by Mewtator) instead of the injector.
+       Loads and hooks via Mewjector's `mods/` scan (verified 2026-10-11). Mewtator manifest path not yet verified.
 3. [ ] Steam transport: host opens a Steam lobby / rich presence; client joins via friends list or invite.
        Transport behind the existing interface; keep TCP for LAN.
 4. [ ] LAN: keep direct IP, add automatic host discovery on the local network.
@@ -54,3 +55,28 @@ ever deleted** (by the mod, on either machine).
 ## Log
 - 2026-10-11: Recon. KB note `games/mewgenics/combat-roster-panel.md` (native C++ engine, SDL3, Mewjector).
   Found mgmp; decided to fork rather than rewrite (user agreed). Baseline build OK with VS 2026.
+- 2026-10-11: Testing will be mostly LAN for now (user).
+- 2026-10-11: **Mewjector loading.**
+  - Mewjector built from source (`third_party_src/mewjector`, HEAD ef8b86c = v3.5) with
+    `cl /LD /O2 /GS- version.c /Fe:version.dll /link /DEF:version.def` under VS 2026 vcvars64.
+    Installed `version.dll` + `chainloader.ini` + empty `mods/` into the game folder.
+  - **Mewjector v3.5 EP fallback crashes this build**: with `EnableEPFallback=` (auto = on) the game dies
+    ~10 ms after "[EP-fallback] Async mod-loader spawned", 0xC0000409 (GS cookie / fast-fail) at
+    Mewgenics.exe+0xD64D7D, before any mod is loaded (log: `test-logs/chainloader_run1_crash.log`).
+    **Fix: `EnableEPFallback=0`** — the game does call a version.dll export ~2 s into startup, so mods
+    load on that first proxy call. Must go in our install instructions. Worth reporting to Mewjector.
+  - mgmp change: `dllmain.cpp` `wait_for_game_window()` — without the loader, init waits until the
+    game's top-level window is visible (+1 s), matching the loader's "nothing before frame 1" timing.
+    `mgmp_loader` sets `MGMP_LOADER=1` in the game's environment so its own launches skip the wait.
+  - Result: `addresses: 54 resolved ... (pinned build)`, swap taken over, ImGui panel up, all default
+    hooks live. Logs land beside the DLL (`mgmp_trace_*.log`, `mgmp_boot.log`).
+  - Mewtator: a DLL inside an enabled mod folder is written into Mewtator's manifest for Mewjector
+    (needs Settings > "Enable DLL Mod Support"). Mod folder = `D:\_Games\Mods\Mewtator\mods\MewgenicsOnline`
+    (`info.json`, `mgmp.dll`, `mgmp.json`); `tools/deploy.ps1 -ModsDir ...` builds + copies (keeps an existing mgmp.json).
+  - Mewtator has `concurrent_launches_enabled` — useful for two instances on one PC for LAN tests.
+- TODO noticed:
+  - `tune::kHookSaveScum` disables the save-scum penalty even in plain single-player with the mod
+    loaded. Should only apply while in a co-op session.
+  - Hook compatibility: mgmp uses its own MinHook + verifies prologues by signature. Another Mewjector mod
+    that hooks the same functions first (e.g. Combat Roster hooks FrameBegin, NextTurn, StatusMenu::update)
+    would make mgmp's signatures miss -> refuse to load. Consider MJ_InstallHook when Mewjector is present.

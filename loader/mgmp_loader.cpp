@@ -527,6 +527,10 @@ int wmain(int argc, wchar_t** argv) {
         wcsncat_s(cmdline, argv[i], _TRUNCATE);
     }
 
+    // Inherited by the game: tells mgmp.dll it is parked at FrameBegin by us and
+    // must not wait for the game window the way a Mewjector-loaded copy does.
+    SetEnvironmentVariableW(L"MGMP_LOADER", L"1");
+
     STARTUPINFOW        si = { sizeof(si) };
     PROCESS_INFORMATION pi = {};
     if (!CreateProcessW(game, cmdline, nullptr, nullptr, FALSE,
