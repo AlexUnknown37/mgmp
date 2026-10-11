@@ -67,6 +67,7 @@ struct NetMsg {
     StateDumpMsg statedump;   // owns its buffer, same contract as catdata
     NodeHashMsg  nodehash;
     HostLeftMsg  hostleft;
+    SyncReqMsg   syncreq;
     HaltMsg   halt;
     char      refuse[192] = {};
 };
@@ -153,6 +154,7 @@ bool net_send_nodehash(const NodeHashMsg& m);
 // dedupe of its own -- mgmp_leave will not send a second one until the host has
 // been back inside a run.
 bool net_send_hostleft(const HostLeftMsg& m);
+bool net_send_syncreq(const SyncReqMsg& m);
 
 // The desync dump. Sent at most once per divergence, so it has no throughput
 // budget to respect and no dedupe to do -- by the time it goes out the run is

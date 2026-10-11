@@ -69,4 +69,7 @@ void ui_on_swap(void* window);
 // click that lands on a button must not also land on the board behind it.
 bool ui_captures_input();
 
+// The game window the panel is attached to (HWND), or null before the first swap.
+void* ui_hwnd();
+
 } // namespace mgmp

@@ -15,6 +15,7 @@
 #include "mgmp_session.h"
 #include "mgmp_ui.h"
 #include "mgmp_lan.h"
+#include "mgmp_house.h"
 
 #include <windows.h>
 #include <cstdio>
@@ -229,6 +230,9 @@ DWORD WINAPI init_thread(LPVOID) {
         return 1;
     }
     log_raw("=== %d hooks live ===", n);
+
+    // Our fork: co-op rules for the House (guest restrictions, End Day sync).
+    house_install(base);
 
     // Tell the loader it can unpark the game. Without this the loader restores
     // the two bytes it patched into FrameBegin while MinHook may be writing its

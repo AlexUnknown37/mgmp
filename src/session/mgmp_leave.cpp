@@ -519,6 +519,17 @@ void leave_status(char* out, size_t out_size) {
                                : "  [pause menu NOT seen yet]");
 }
 
+uint32_t leave_live_scenes(char (*out)[40], uint32_t cap) {
+    SceneList s{};
+    if (!read_scenes(s)) return 0;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < s.count && n < cap; ++i) {
+        if (s.dying[i] || !s.name[i][0]) continue;
+        strncpy_s(out[n++], 40, s.name[i], _TRUNCATE);
+    }
+    return n;
+}
+
 bool leave_scene_live(const char* name) {
     SceneList s{};
     if (!read_scenes(s)) return false;

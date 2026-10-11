@@ -2119,6 +2119,11 @@ void lockstep_pump() {
                 leave_on_message(m.hostleft);
                 break;
 
+            // Our fork: the guest's Force Sync button.
+            case MSG_SYNCREQ:
+                savefile_on_sync_request(m.from);
+                break;
+
             // Not epoch-gated, and deliberately so: a cat is RUN state, not
             // battle state. It stays true across a battle boundary, so a late
             // one is still correct -- unlike an ACTION, which means nothing

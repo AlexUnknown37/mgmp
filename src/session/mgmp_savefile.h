@@ -113,6 +113,13 @@ void savefile_note_loaded(const void* name);
 // to go back through the menu to follow. The UI shows a banner while true.
 bool savefile_must_rejoin();
 
+// Host: End Day was pressed (from mgmp_house). Sends the new day once written.
+void savefile_on_end_day();
+// Host: a client pressed Force Sync.
+void savefile_on_sync_request(uint8_t from);
+// Client: the Force Sync button. False when there is no session to ask.
+bool savefile_request_sync();
+
 // Is an adventure loaded on THIS peer? Read off the MewDirector's run cat-id
 // list ({cap,count,data} at +1464/+1468/+1472), the same fields catsync uses,
 // with the same implausibility bound -- so a drifted offset answers "no" rather

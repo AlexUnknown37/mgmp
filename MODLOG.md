@@ -110,3 +110,26 @@ ever deleted** (by the mod, on either machine).
   - Hook compatibility: mgmp uses its own MinHook + verifies prologues by signature. Another Mewjector mod
     that hooks the same functions first (e.g. Combat Roster hooks FrameBegin, NextTurn, StatusMenu::update)
     would make mgmp's signatures miss -> refuse to load. Consider MJ_InstallHook when Mewjector is present.
+- 2026-10-11: **House rules (user spec)**: guest may only look (storage, pick up/inspect cats); End Day on the
+  host ends the guest's day too; ghost cursor of the other player only while that player has a menu open;
+  Force Sync button for the guest. Second LAN test showed the join works end to end (guest auto-Play -> save
+  screen -> redirected load of mgmp_coop.sav -> House). Guest pressing End Day did nothing for the host (expected).
+  - RE (capstone over the shipped exe, `scratchpad/re_tool.py`): `AddComponent<EndDayTransition>` = RVA 0x1F77F0
+    (only function naming the literal "EndDayTransition"; callers: the sign lambda chunk 0x1EF495 + three
+    console-command-like functions taking vector<string>). `AddComponent<DepartTransition>` = 0x3C9F90 (only
+    caller 0x3B13F0 "start adventure with team", itself called from 0xAE360). Both begin
+    `cmp byte [rcx+0x4B0],0 / jne -> return 0` (scene dying), so returning null is a native path; callers ignore rax.
+    Button::Click = RVA 0x97E8E0 on this build (`kCalls`), name at Button+504.
+  - `src/session/mgmp_house.{h,cpp}`: finds both creators at runtime by the string literal (scan .text for a
+    rip-relative ref, RtlLookupFunctionEntry for the start, refuse if >1 function); MinHooks them + Button::Click.
+    Guest: End Day / Depart return null + toast; House buttons with prefixes Shop_Buy, Furniture,
+    Button_HouseBossResummon swallowed. Every distinct button name is logged at Trace ("HOUSE button pressed")
+    for refining the blocklist. Host: End Day -> `savefile_on_end_day()`.
+  - Savefile handoffs now: ToAdventure / ToHouse / DayEnd (wait for the save's mtime to change, House live,
+    +2 s; 60 s fallback) / Sync (host in House or on the map). Client on a fresh save outside the menus:
+    must_rejoin + leave armed + `house` posts VK_ESCAPE (down, +80 ms up; max 3, 6 s apart) so the pause menu
+    opens and mgmp_leave presses Quit To Menu, then auto-Play reloads.
+  - Proto 28: MSG_SYNCREQ (client -> host). CURSOR with nx < 0 = hidden. Outside battle each peer sends its
+    pointer only while a non-base scene is live ("menu open"; base set in kBaseScenes) and the hide sentinel
+    otherwise. Scene-set changes logged at Trace ("HOUSE scenes: ...") to learn menu scene names.
+  - Known gap: blocking Depart happens after the guest has picked a team (0x3B13F0 continues after the null).

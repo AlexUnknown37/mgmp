@@ -1,6 +1,7 @@
 // mgmp_cursor.cpp -- see mgmp_cursor.h for why this is immediate-mode and why
 // the unit on the wire is a tile.
 #include "mgmp_cursor.h"
+#include "mgmp_house.h"
 
 #include "mgmp_addresses.h"
 #include "mgmp_resolve.h"
@@ -373,6 +374,7 @@ void cursor_on_status_menu(void* sm) {
     g.touched_pips = true;
 
     // --- publish where we are pointing --------------------------------------
+    house_note_battle_cursor();   // the House cursor path stays quiet meanwhile
     CursorMsg out;
     out.battle_id = battle;
     out.owns_turn = mine ? 1 : 0;

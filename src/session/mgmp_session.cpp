@@ -3,6 +3,7 @@
 #include "mgmp_cursor.h"
 #include "mgmp_overlay.h"
 #include "mgmp_lan.h"
+#include "mgmp_house.h"
 #include "mgmp_session.h"
 #include "mgmp_net.h"
 #include "mgmp_catsync.h"
@@ -477,6 +478,7 @@ void session_update() {
     // replies. It never touches the session itself, so it runs every frame
     // regardless of the phase checks below.
     lan_pump();
+    house_pump();
 
     // BEFORE the early return below, deliberately: a Host or Join pressed with
     // no session at all arrives with phase == Off, which is precisely the state

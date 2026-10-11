@@ -25,6 +25,7 @@
 #include "mgmp_leave.h"
 #include "mgmp_lan.h"
 #include "mgmp_savefile.h"
+#include "mgmp_house.h"
 
 // Declared by imgui_impl_win32.h's owner rather than the header itself.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -619,6 +620,15 @@ void draw_main() {
         } else {
             ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());
             ImGui::TextDisabled("Your own saves are never touched; the host's run is kept in mgmp_coop.sav.");
+            ImGui::BeginDisabled(savefile_must_rejoin());
+            if (ImGui::Button("Force Sync")) {
+                if (savefile_request_sync())
+                    strcpy_s(g.message, "Asked the host for a fresh copy -- you will be brought back in.");
+                else
+                    strcpy_s(g.message, "Couldn't reach the host.");
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip("Reload the host's game from scratch. Use it if your House or run looks different from the host's.");
         }
         if (savefile_must_rejoin())
             ImGui::TextColored(level_colour(LogLevel::Warn),
@@ -633,6 +643,8 @@ void draw_main() {
         ImGui::EndDisabled();
     }
 
+    if (house_toast()[0])
+        ImGui::TextColored(level_colour(LogLevel::Warn), "%s", house_toast());
     if (g.message[0]) ImGui::TextWrapped("%s", g.message);
     ImGui::Spacing();
     ImGui::Checkbox("Developer panels", &g.show_dev);
@@ -888,6 +900,8 @@ void ui_shutdown() {
     // and shutdown can run from a thread with no current context.
     g.visible = false;
 }
+
+void* ui_hwnd() { return g.hwnd; }
 
 bool ui_captures_input() {
     if (!g.ready || !g.visible) return false;

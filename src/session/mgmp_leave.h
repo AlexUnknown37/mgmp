@@ -116,4 +116,8 @@ bool leave_in_run();
 // ("House", "MainMenu", "SaveSelectionScreen"). A fresh read every call.
 bool leave_scene_live(const char* name);
 
+// Names of every loaded scene that is not being torn down. Returns the count
+// (0 when the scene list could not be read).
+uint32_t leave_live_scenes(char (*out)[40], uint32_t cap);
+
 } // namespace mgmp

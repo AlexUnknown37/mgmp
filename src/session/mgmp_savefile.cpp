@@ -281,11 +281,13 @@ struct State {
     // client's copy is simply in the wrong place. The host re-publishes its
     // save as a fresh pick at that moment; the client drops back to the menu and
     // reloads it, exactly as if the host had picked a slot again.
-    enum class Handoff { None, ToAdventure, ToHouse };
+    enum class Handoff { None, ToAdventure, ToHouse, DayEnd, Sync };
     Handoff  handoff        = Handoff::None;
     uint32_t handoff_frames = 0;
     bool     host_in_house  = false;   // the House scene was live last frame
     bool     host_seen_adv  = false;   // an adventure was loaded since the last publish
+    uint64_t day_mtime      = 0;       // the save's mtime when End Day was pressed
+    uint32_t day_changed_at = 0;       // handoff_frames when a newer write was seen
     // --- client ---
     bool     must_rejoin    = false;   // a fresh save arrived while in a run/House
 
@@ -476,6 +478,19 @@ bool flush_live_run() {
         return false;
     g.save_adventure((void*)director);
     return true;
+}
+
+// The host's save file's last-write time, 0 if unknown.
+uint64_t save_mtime() {
+    ensure_dir();
+    if (!g.have_dir || !g.name[0]) return 0;
+    wchar_t wname[128];
+    wide(g.name, wname, 128);
+    wchar_t path[MAX_PATH];
+    _snwprintf_s(path, _TRUNCATE, L"%s\\%s", g.dir, wname);
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &a)) return 0;
+    return ((uint64_t)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime;
 }
 
 bool publish(uint8_t to, bool fresh) {
@@ -694,32 +709,65 @@ void savefile_pump() {
 
     if (!g.on || g.is_client) return;
 
-    // HOUSE <-> ADVENTURE. Only once a save is out: before that the first
-    // publish covers it. "Left the House" is the House scene going away while
-    // an adventure loads; "came home" is the House scene coming back.
+    // HANDOFFS -- moments the host's save moves on and the client's copy has to
+    // be replaced: leaving the House for an adventure, coming home, ending the
+    // day, or the client asking (Force Sync). Only once a save is out: before
+    // that the first publish covers it.
     if (g.published && net_active()) {
         const bool house = leave_scene_live("House");
-        if (adventure_is_loaded_impl()) g.host_seen_adv = true;
-        if (g.host_in_house && !house) {
-            g.handoff = State::Handoff::ToAdventure;
-            g.handoff_frames = 0;
-            log_line("SAVEFILE", "the host left the House -- will send the new "
-                                 "adventure once it is standing on the map");
-        } else if (!g.host_in_house && house && g.host_seen_adv &&
-                   g.handoff == State::Handoff::None) {
-            g.handoff = State::Handoff::ToHouse;
-            g.handoff_frames = 0;
-            log_line("SAVEFILE", "the host is back in the House -- will send its "
-                                 "save once the game has written it");
+        const bool adv   = adventure_is_loaded_impl();
+        if (adv) g.host_seen_adv = true;
+        if (g.handoff == State::Handoff::None) {
+            if (g.host_in_house && !house) {
+                g.handoff = State::Handoff::ToAdventure;
+                g.handoff_frames = 0;
+                log_line("SAVEFILE", "the host left the House -- will send the new "
+                                     "adventure once it is standing on the map");
+            } else if (!g.host_in_house && house && g.host_seen_adv) {
+                g.handoff = State::Handoff::ToHouse;
+                g.handoff_frames = 0;
+                log_line("SAVEFILE", "the host is back in the House -- will send its "
+                                     "save once the game has written it");
+            }
         }
         g.host_in_house = house;
 
         bool ready = false;
         ++g.handoff_frames;
-        if (g.handoff == State::Handoff::ToAdventure)
-            ready = adventure_is_loaded_impl() && follow_on_map() && g.handoff_frames > 60;
-        else if (g.handoff == State::Handoff::ToHouse)
+        switch (g.handoff) {
+        case State::Handoff::ToAdventure:
+            ready = adv && follow_on_map() && g.handoff_frames > 60;
+            // Left the House without an adventure loading (a menu, a cutscene
+            // that came back): not a departure after all.
+            if (!ready && house && g.handoff_frames > 600) {
+                g.handoff = State::Handoff::None;
+                log_line("SAVEFILE", "the host is in the House again with no adventure "
+                                     "-- nothing to hand off");
+            }
+            break;
+        case State::Handoff::ToHouse:
             ready = g.handoff_frames > 300;        // ~5 s for the game's own save
+            break;
+        case State::Handoff::DayEnd: {
+            // Wait for the game to write the new day, then for it to settle.
+            if (g.handoff_frames % 30 == 0) {
+                const uint64_t m = save_mtime();
+                if (m && m != g.day_mtime) { g.day_mtime = m; g.day_changed_at = g.handoff_frames; }
+            }
+            ready = house && g.day_changed_at && g.handoff_frames - g.day_changed_at > 120;
+            if (!ready && house && g.handoff_frames > 3600) {
+                ready = true;                      // 60 s and no write seen: send what is there
+                log_line_lvl(LogLevel::Warn, "SAVEFILE", "the day ended but no save write was "
+                             "seen in 60 s -- sending the file as it is");
+            }
+            break;
+        }
+        case State::Handoff::Sync:
+            ready = (house && !adv) || (adv && follow_on_map());
+            break;
+        default:
+            break;
+        }
         if (ready) {
             // A new run as far as the per-run dedupe caches are concerned --
             // the same forget a slot click does.
@@ -727,9 +775,12 @@ void savefile_pump() {
             invsync_forget();
             runhist_forget();
             if (publish(kNoPeer, /*fresh=*/true)) {
-                g.host_seen_adv = false;
-                log_line("SAVEFILE", "handoff sent -- the client will reload into %s",
-                         g.handoff == State::Handoff::ToAdventure ? "the adventure" : "the House");
+                g.host_seen_adv = adv;
+                const char* what = g.handoff == State::Handoff::ToAdventure ? "the adventure"
+                                 : g.handoff == State::Handoff::DayEnd      ? "the new day"
+                                 : g.handoff == State::Handoff::Sync        ? "the host's game (force sync)"
+                                                                            : "the House";
+                log_line("SAVEFILE", "handoff sent -- the client will reload into %s", what);
                 g.handoff = State::Handoff::None;
             }
         }
@@ -1068,6 +1119,50 @@ int savefile_autoselect(void* ss) {
     g.applied = true;
     g.must_rejoin = false;
     return slot;
+}
+
+void savefile_on_end_day() {
+    ensure_state();
+    if (!g.on || g.is_client || !g.published) return;
+    g.handoff        = State::Handoff::DayEnd;
+    g.handoff_frames = 0;
+    g.day_mtime      = save_mtime();
+    g.day_changed_at = 0;
+    log_line("SAVEFILE", "the host ended the day -- will send the new day once the game "
+                         "has saved it");
+}
+
+void savefile_on_sync_request(uint8_t from) {
+    ensure_state();
+    if (!g.on || g.is_client) return;
+    if (!g.have_slot) {
+        log_line("SAVEFILE", "peer %u asked for a sync, but this host has no save loaded yet",
+                 (unsigned)from);
+        return;
+    }
+    if (!g.published) {
+        log_line("SAVEFILE", "peer %u asked for a sync -- the first send is already on its way",
+                 (unsigned)from);
+        return;
+    }
+    if (g.handoff != State::Handoff::None && g.handoff != State::Handoff::Sync) {
+        log_line("SAVEFILE", "peer %u asked for a sync -- one is already coming", (unsigned)from);
+        return;
+    }
+    g.handoff        = State::Handoff::Sync;
+    g.handoff_frames = 0;
+    log_line("SAVEFILE", "peer %u asked for a sync -- sending as soon as this host is in the "
+                         "House or standing on the map", (unsigned)from);
+}
+
+bool savefile_request_sync() {
+    ensure_state();
+    if (!g.on || !g.is_client || !net_active()) return false;
+    SyncReqMsg m{};
+    const bool ok = net_send_syncreq(m);
+    log_line("SAVEFILE", ok ? "asked the host for a fresh copy of its game (force sync)"
+                            : "!! could not send the force-sync request");
+    return ok;
 }
 
 bool savefile_must_rejoin() { return g.on && g.is_client && g.must_rejoin; }
