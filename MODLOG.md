@@ -169,3 +169,8 @@ ever deleted** (by the mod, on either machine).
     with two games on one PC (GPU contention at ~175 fps each; not seen with one copy). Cursor visibility is now
     decided from one scene-list read (House present, no menu scene) and only flips after 3 identical
     refreshes (~18 frames).
+- 2026-10-11: **Test 6.** Guest buttons all behave as wanted (user). End Day: host detected it and sent the new
+  day; guest received it and pressed Escape, but mgmp_leave disarmed at once ("out of the run and on 'House'"):
+  its OutOfRun test counts the House as already-left (written for host-left-the-adventure). Force Sync had only
+  worked by timing luck. Fix: while `savefile_must_rejoin()`, the House does not count as done -- only the main
+  menu / save screen. Not yet re-tested.

@@ -378,7 +378,11 @@ void leave_pump() {
     //
     // Before the role split, because leave_request_local can arm a host and a
     // departure that completes has to be reported whoever asked for it.
-    if (g.pending && here == Where::OutOfRun) {
+    // Our fork: a guest re-joining after a House handoff (End Day, Force Sync)
+    // starts IN the House, which this test counts as "out". For it only the
+    // menu or the save screen means done.
+    const bool rejoin_in_house = savefile_must_rejoin() && out && strcmp(out, "House") == 0;
+    if (g.pending && here == Where::OutOfRun && !rejoin_in_house) {
         g.pending = false;
         ++g.left;
         log_line("LEAVE", "out of the run and on '%s' -- if the host picks a save "
