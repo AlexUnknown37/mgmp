@@ -174,3 +174,8 @@ ever deleted** (by the mod, on either machine).
   its OutOfRun test counts the House as already-left (written for host-left-the-adventure). Force Sync had only
   worked by timing luck. Fix: while `savefile_must_rejoin()`, the House does not count as done -- only the main
   menu / save screen. Not yet re-tested.
+- 2026-10-11: User screenshot: an open House drawer (cat Stats, storage) slides the House sideways, so the
+  screen-fraction ghost cursor lands on the wrong spot. Fix: drawers count as menus. Panels are remembered from
+  clicks (impl+0x10); panel+0x50 = open flag (tested/cleared by 0x203C80; assumption, logged at Trace
+  "drawer open/closed"). Sender hides while any drawer is open; receiver draws no peer pointer while its own
+  drawer is open (`house_local_view_shifted`).

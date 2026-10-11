@@ -46,4 +46,8 @@ const char* house_toast();
 // loaded set). Exposed for the debug panel.
 bool house_menu_open();
 
+// A House drawer is open here, so this screen is slid sideways: peer pointers
+// (screen fractions from an unshifted view) would land wrong, so none are drawn.
+bool house_local_view_shifted();
+
 } // namespace mgmp

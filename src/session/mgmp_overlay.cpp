@@ -1,6 +1,7 @@
 // mgmp_overlay.cpp -- see mgmp_overlay.h for why this draws in screen space
 // with GL rather than through the game's immediate-mode board UI.
 #include "mgmp_overlay.h"
+#include "mgmp_house.h"
 
 #include "mgmp_addresses.h"
 #include "mgmp_resolve.h"
@@ -1384,6 +1385,9 @@ void overlay_on_swap(void* window) {
         if (i == self) continue;
         Peer& p = g.peers[i];
         if (!p.have || now - p.at > kStaleMs) continue;
+        // Our fork: a House drawer open HERE slides this view sideways, so a
+        // screen fraction from the peer's unshifted view would point wrong.
+        if (house_local_view_shifted()) continue;
 
         // Chase the reported position. The first sample SNAPS: easing in from
         // (0,0) would send the arrow sailing across the screen the moment a
@@ -1435,7 +1439,7 @@ void overlay_on_message(uint8_t from, const CursorMsg& c) {
     Peer& p = g.peers[from];
     // Our fork: outside battle a peer sends mode == kCursorHiddenMode while its
     // pointer should not be shown (mgmp_house).
-    if (c.mode == kCursorHiddenMode) { p.have = false; return; }
+    if (c.mode == kCursorHiddenMode) { p.have = false; p.placed = false; return; }
     p.nx = c.nx;
     p.ny = c.ny;
     p.mode = c.mode;

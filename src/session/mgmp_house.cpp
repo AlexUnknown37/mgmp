@@ -97,6 +97,12 @@ struct House {
     bool     show_cursor = false;
     bool     want_cursor = false;
     uint32_t want_streak = 0;
+    // House drawer panels seen through clicks (map, storage, stats, ...). An
+    // open one slides the House sideways, so a screen-fraction cursor would
+    // point at the wrong spot on the other screen: it counts as a menu.
+    const void* panels[8] = {};
+    uint32_t    panel_count = 0;
+    bool        drawer_open = false;
     uint32_t frame = 0;
     uint64_t scene_sig = 0;
 
@@ -230,6 +236,19 @@ void panel_class(const void* button, uint32_t action, char* out, size_t cap) {
     char cls[96] = {};
     if (!rtti_class_name(panel, cls, sizeof(cls)) || !strstr(cls, "HouseDrawerPanel")) return;
     if (!mem_read_std_string((const uint8_t*)panel + kPanel_Name, out, cap)) out[0] = 0;
+    bool known = false;
+    for (uint32_t i = 0; i < g.panel_count; ++i) if (g.panels[i] == panel) known = true;
+    if (!known && g.panel_count < 8) g.panels[g.panel_count++] = panel;
+}
+
+// Any remembered drawer open? Panel+0x50 is the open flag 0x203C80 tests and
+// clears when it closes the panel.
+bool any_drawer_open() {
+    for (uint32_t i = 0; i < g.panel_count; ++i) {
+        uint8_t open = 0;
+        if (mem_read((const uint8_t*)g.panels[i] + 0x50, &open, 1) && open) return true;
+    }
+    return false;
 }
 
 void note_button(const char* name, uint32_t action, const char* panel, bool house) {
@@ -314,7 +333,12 @@ void refresh_menu_state() {
         bool house = false;
         for (uint32_t i = 0; i < n; ++i) if (strcmp(names[i], "House") == 0) { house = true; break; }
         g.in_house = house;
-        const bool want = house && !menu;
+        const bool drawer = any_drawer_open();
+        if (drawer != g.drawer_open) {
+            g.drawer_open = drawer;
+            log_line_lvl(LogLevel::Trace, "HOUSE", "drawer %s", drawer ? "open" : "closed");
+        }
+        const bool want = house && !menu && !drawer;
         if (want == g.want_cursor) ++g.want_streak;
         else { g.want_cursor = want; g.want_streak = 1; }
         if (g.want_streak >= 3) g.show_cursor = g.want_cursor;
@@ -433,5 +457,7 @@ void house_note_battle_cursor() { g.last_battle_cursor = GetTickCount64(); }
 const char* house_toast() { return GetTickCount64() < g.toast_until ? g.toast : ""; }
 
 bool house_menu_open() { return g.menu_open; }
+
+bool house_local_view_shifted() { return g.drawer_open; }
 
 } // namespace mgmp
