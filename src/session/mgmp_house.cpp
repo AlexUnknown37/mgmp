@@ -100,9 +100,13 @@ struct House {
     // House drawer panels seen through clicks (map, storage, stats, ...). An
     // open one slides the House sideways, so a screen-fraction cursor would
     // point at the wrong spot on the other screen: it counts as a menu.
-    const void* panels[8] = {};
-    uint32_t    panel_count = 0;
+    // Drawers currently open, tracked through the game's own open/close
+    // functions (they play "DrawerOpen_<name>" / "DrawerClose_<name>").
+    const void* open_drawers[8] = {};
+    uint32_t    open_count = 0;
     bool        drawer_open = false;
+    void (__fastcall* o_drawer_open)(void*)  = nullptr;
+    void (__fastcall* o_drawer_close)(void*) = nullptr;
     uint32_t frame = 0;
     uint64_t scene_sig = 0;
 
@@ -117,7 +121,8 @@ struct House {
     uint64_t esc_next_at = 0;
     bool     esc_down    = false;
     uint64_t esc_up_at   = 0;
-    bool     quit_wanted = false;   // set by pump_rejoin, done in a Button::update
+    bool     quit_wanted = false;   // unused since the direct quit was dropped
+    bool     said_wait   = false;
 
     // Button name + action seen, logged once each (discovery for the blocklist).
     char     seen[96][64] = {};
@@ -237,19 +242,31 @@ void panel_class(const void* button, uint32_t action, char* out, size_t cap) {
     char cls[96] = {};
     if (!rtti_class_name(panel, cls, sizeof(cls)) || !strstr(cls, "HouseDrawerPanel")) return;
     if (!mem_read_std_string((const uint8_t*)panel + kPanel_Name, out, cap)) out[0] = 0;
-    bool known = false;
-    for (uint32_t i = 0; i < g.panel_count; ++i) if (g.panels[i] == panel) known = true;
-    if (!known && g.panel_count < 8) g.panels[g.panel_count++] = panel;
 }
 
-// Any remembered drawer open? Panel+0x50 is the open flag 0x203C80 tests and
-// clears when it closes the panel.
-bool any_drawer_open() {
-    for (uint32_t i = 0; i < g.panel_count; ++i) {
-        uint8_t open = 0;
-        if (mem_read((const uint8_t*)g.panels[i] + 0x50, &open, 1) && open) return true;
+// (A first try read panel+0x50 as an "open" flag; it never cleared, so the
+// cursor vanished for good. The open/close functions themselves are the truth.)
+void __fastcall h_drawer_open(void* panel) {
+    bool known = false;
+    for (uint32_t i = 0; i < g.open_count; ++i) if (g.open_drawers[i] == panel) known = true;
+    if (!known && g.open_count < 8) g.open_drawers[g.open_count++] = panel;
+    g.o_drawer_open(panel);
+}
+
+void __fastcall h_drawer_close(void* panel) {
+    for (uint32_t i = 0; i < g.open_count; ++i) {
+        if (g.open_drawers[i] == panel) {
+            g.open_drawers[i] = g.open_drawers[--g.open_count];
+            break;
+        }
     }
-    return false;
+    g.o_drawer_close(panel);
+}
+
+bool any_drawer_open() {
+    // Leaving the House drops every drawer with it.
+    if (!g.in_house) g.open_count = 0;
+    return g.open_count > 0;
 }
 
 void note_button(const char* name, uint32_t action, const char* panel, bool house) {
@@ -420,27 +437,32 @@ void pump_rejoin() {
     const uint64_t now = GetTickCount64();
     if (g.esc_down && now >= g.esc_up_at) { post_escape(false); g.esc_down = false; }
 
-    if (!savefile_must_rejoin()) { g.esc_presses = 0; g.esc_next_at = 0; return; }
+    if (!savefile_must_rejoin()) { g.esc_presses = 0; g.esc_next_at = 0; g.said_wait = false; return; }
     if (leave_scene_live("MainMenu") || leave_scene_live("SaveSelectionScreen")) return;
     if (g.esc_presses >= 3 || now < g.esc_next_at || g.esc_down) return;
 
-    // Quit to the menu directly; the auto-Play then loads the host's new save.
-    // Fallback when the action cannot be verified: an Escape (opens the pause
-    // menu, mgmp_leave presses Quit To Menu) -- which needs the window focused.
+    // An Escape opens the pause menu; mgmp_leave (armed by savefile) presses
+    // Quit To Menu and the auto-Play loads the host's new save.
     g.esc_next_at = now + 6000;
     ++g.esc_presses;
-    if (quit_to_menu_fn()) {
-        // Done from the next Button::update (inside the scene update, like a
-        // real button press), not from here: FrameBegin is outside it, and
-        // starting the transition from FrameBegin crashed the game.
-        g.quit_wanted = true;
-        log_line("HOUSE", "quitting to the menu to follow the host (%u/3)", g.esc_presses);
-    } else {
+    // Calling the game's quit-to-menu action (0x1BF4F0) directly crashed the
+    // guest twice (from FrameBegin and from Button::update), so it is not used.
+    // A focused guest gets an Escape; otherwise the UI banner asks the player.
+    if (GetForegroundWindow() != (HWND)ui_hwnd()) {
+        if (!g.said_wait) {
+            g.said_wait = true;
+            log_line("HOUSE", "the host moved on -- waiting for the player to press Escape "
+                              "(this window is not focused, so a key cannot be sent)");
+        }
+        g.esc_presses = 0;    // keep watching for focus
+        g.esc_next_at = now + 1000;
+        return;
+    }
+    {
         post_escape(true);
         g.esc_down  = true;
         g.esc_up_at = now + 80;
-        log_line("HOUSE", "pressing Escape to go back through the menu and follow the host (%u/3)"
-                          " -- the quit-to-menu action is not available on this build",
+        log_line("HOUSE", "pressing Escape to go back through the menu and follow the host (%u/3)",
                  g.esc_presses);
     }
 }
@@ -456,6 +478,10 @@ void house_install(uintptr_t base) {
     hook(function_naming(base, "DepartTransition"), (void*)&h_depart, (void**)&g.o_depart,
          "the Depart transition");
     hook(addr_of_call(C_ButtonClick), (void*)&h_click, (void**)&g.o_click, "Button::Click");
+    hook(function_naming(base, "DrawerOpen_"), (void*)&h_drawer_open, (void**)&g.o_drawer_open,
+         "the House drawer open");
+    hook(function_naming(base, "DrawerClose_"), (void*)&h_drawer_close, (void**)&g.o_drawer_close,
+         "the House drawer close");
 }
 
 void house_note_swap() { ++g.swaps; }

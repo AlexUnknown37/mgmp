@@ -192,3 +192,19 @@ ever deleted** (by the mod, on either machine).
   and `house_on_button_update` (called from mgmp's Button::update hook, after the original -- where real button
   clicks start transitions) makes the call. Untested. If this still crashes, drop the direct call.
   - Cursor drawer fix verified working in logs ("drawer open" on Stats).
+- 2026-10-11: **Test 9.** Guest still crashed calling 0x1BF4F0 from Button::update -> the direct quit-to-menu call
+  is DROPPED. Rejoin now: focused guest gets a posted Escape (worked before), unfocused guest waits for the
+  player (UI banner "press Esc"); mgmp_leave then presses Quit To Menu.
+  - Cursor never came back after the cat menu: panel+0x50 is not an open flag. Now hooking the drawer open/close
+    functions themselves (only functions naming "DrawerOpen_" = 0x204920 and "DrawerClose_" = 0x2049D0,
+    `void(panel*)`), keeping a set of open panels.
+  - **User's real goal for End Day:** guest gets the same cat events and moves to the next day like the host,
+    no main menu. Plan: (1) in-place House reload, (2) host at End Day flushes its save, sends save + sim RNG
+    (TLS+0x178) -> guest reloads in place, then both run End Day from the same seed (deterministic, like mgmp's
+    battles). RE so far: 0x1BE1A0 = AddComponent<MewDirector>(scene, sub_96B3E0(scene), &filename) -> allocs
+    0x790, ctor 0x1BE7F0, then MewDirector::init(filename). Save-screen completion lambda 0x1C06C0 (capture
+    {SaveSelection*, slot}): marks the SaveSelection scene dying (scene+0x4DB=1), calls 0x908E0->0x94EBA0, then
+    AddComponent<MewDirector>(Director+0x18 scene, ..., &names[slot]) and tail-jumps 0x3AEFD0(newDirector)
+    (probably "start": goes to House/adventure). Other MewDirector::init callers: 0x31C1E0 (literal filename,
+    callers 0x317230/0x317C50/0x318B50), 0x758650 (caller 0x750F90). Open question: how the old MewDirector is
+    torn down (singleton) before a new one is made.
