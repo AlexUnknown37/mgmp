@@ -1,5 +1,7 @@
 #include "mgmp_ui.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +23,7 @@
 #include "mgmp_follow.h"
 #include "mgmp_combatlock.h"
 #include "mgmp_leave.h"
+#include "mgmp_lan.h"
 
 // Declared by imgui_impl_win32.h's owner rather than the header itself.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -63,6 +66,13 @@ struct UI {
     // launch was configured for and a reconnect is one click.
     char addr[64] = "127.0.0.1";
     int  port     = 27600;
+
+    // The player-facing "Mewgenics Online" window. The mgmp developer panels
+    // (session + log) are behind a checkbox on it.
+    char name[32]     = {};
+    char message[160] = {};
+    bool show_dev     = false;
+    bool searched     = false;   // a LAN search has run at least once
 
     // Reused every frame so the filtered pass allocates nothing after warm-up.
     std::vector<uint32_t> filtered;
@@ -477,9 +487,157 @@ void draw_connect() {
     }
 }
 
+// --- the player-facing window -----------------------------------------------
+//
+// Modelled on Gungeon Online's F8 window: a name, host or join over LAN, and a
+// "Find LAN games" list you click to join. Like draw_connect, every button only
+// RECORDS a request that session_update applies next frame.
+
+void join_lan(const char* addr, uint16_t port) {
+    lan_stop_search();
+    lan_save_last_addr(addr);
+    session_request_join(addr, port);
+    g.message[0] = 0;
+}
+
+// Accepts "192.168.1.20" or "192.168.1.20:27600".
+void join_typed() {
+    char text[64];
+    strncpy_s(text, g.addr, _TRUNCATE);
+    char* p = text; while (*p == ' ') ++p;
+    char* end = p + strlen(p); while (end > p && end[-1] == ' ') *--end = 0;
+
+    int port = g.port;
+    if (char* colon = strrchr(p, ':')) {
+        *colon = 0;
+        port = atoi(colon + 1);
+        if (port < 1 || port > 65535) {
+            strcpy_s(g.message, "That port isn't a number from 1 to 65535.");
+            return;
+        }
+    }
+    IN_ADDR probe;
+    if (!p[0] || InetPtonA(AF_INET, p, &probe) != 1) {
+        strcpy_s(g.message, "That isn't an IP address (like 192.168.1.20).");
+        return;
+    }
+    lan_save_last_addr(g.addr);
+    lan_stop_search();
+    session_request_join(p, (uint16_t)port);
+    g.message[0] = 0;
+}
+
+void draw_main() {
+    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Mewgenics Online", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End(); return;
+    }
+
+    // Name row.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Name:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::InputText("##name", g.name, sizeof(g.name));
+    ImGui::SameLine();
+    if (ImGui::Button("Save")) {
+        lan_save_name(g.name);
+        _snprintf_s(g.message, sizeof(g.message), _TRUNCATE,
+                    "Name saved. Others will see: %s", lan_display_name());
+    }
+    if (!g.name[0])
+        ImGui::TextDisabled(lan_steam_name()[0] ? "(empty = your Steam name, %s)"
+                                                : "(empty = your Windows name, %s)",
+                            lan_display_name());
+    ImGui::Spacing();
+
+    const bool busy = session_request_pending();
+    if (!net_active()) {
+        ImGui::SeparatorText("LAN (same network)");
+        ImGui::BeginDisabled(busy);
+
+        char host_label[64];
+        _snprintf_s(host_label, sizeof(host_label), _TRUNCATE, "Host on LAN (port %d)", g.port);
+        if (ImGui::Button(host_label)) {
+            lan_stop_search();
+            session_request_host((uint16_t)g.port);
+            g.message[0] = 0;
+        }
+        ImGui::SetItemTooltip("Start your game as the host. Your partner joins you, "
+                              "and the run you pick from your saves is the one you both play.");
+
+        ImGui::SetNextItemWidth(200.0f);
+        if (ImGui::InputText("##addr", g.addr, sizeof(g.addr),
+                             ImGuiInputTextFlags_EnterReturnsTrue))
+            join_typed();
+        ImGui::SameLine();
+        if (ImGui::Button("Join")) join_typed();
+        ImGui::TextDisabled("Type the host's address, e.g. 192.168.1.20");
+
+        if (ImGui::Button("Find LAN games")) { lan_search((uint16_t)g.port); g.searched = true; }
+        LanHost found[kLanMaxFound];
+        const uint32_t n = lan_found(found, kLanMaxFound);
+        for (uint32_t i = 0; i < n; ++i) {
+            const LanHost& h = found[i];
+            char label[160];
+            _snprintf_s(label, sizeof(label), _TRUNCATE, "%s  (%s:%u)  %u/%u players%s##lan%u",
+                        h.name, h.addr, (unsigned)h.port, (unsigned)h.players,
+                        (unsigned)kMaxPeers, h.same_version ? "" : "  [different version]", i);
+            ImGui::BeginDisabled(!h.same_version);
+            if (ImGui::Button(label)) join_lan(h.addr, h.port);
+            ImGui::EndDisabled();
+        }
+        if (lan_searching() && n == 0)
+            ImGui::TextDisabled("Searching...");
+        else if (!lan_searching() && n == 0 && g.searched)
+            ImGui::TextDisabled("No games found. Is the host hosting? Windows Firewall\n"
+                                "may also be blocking Mewgenics on one of the PCs.");
+
+        ImGui::EndDisabled();
+        if (busy) ImGui::TextDisabled("starting...");
+
+        ImGui::SeparatorText("Steam");
+        ImGui::TextDisabled("Steam join is coming in a later version.");
+    } else {
+        const NetRole r = net_role();
+        const NetState st = net_state();
+        ImGui::SeparatorText(r == NetRole::Host ? "Hosting on LAN" : "Joined over LAN");
+        ImGui::TextDisabled("Status:");
+        ImGui::SameLine();
+        ImGui::TextColored(state_colour(st), "%s", state_name(st));
+        ImGui::TextDisabled("%s", session_status());
+
+        if (r == NetRole::Host) {
+            char addrs[256];
+            lan_local_addresses(addrs, sizeof(addrs));
+            ImGui::TextWrapped("Your LAN address: %s  (port %u)", addrs, (unsigned)net_port());
+            ImGui::TextDisabled("Your partner can press \"Find LAN games\", or type the first address.");
+            ImGui::Text("Players: %u", (unsigned)(net_peer_count() ? net_peer_count() : 1));
+            ImGui::TextDisabled("Pick your save as usual -- your partner is brought into the same run.");
+        } else {
+            ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());
+            ImGui::TextDisabled("Your own saves are never touched; the host's run is kept in mgmp_coop.sav.");
+        }
+        if (lockstep_halted())
+            ImGui::TextColored(level_colour(LogLevel::Error),
+                               "HALTED -- the two games disagreed. Open the developer panels for details.");
+
+        ImGui::BeginDisabled(busy);
+        if (ImGui::Button("Leave")) { session_request_disconnect(); g.message[0] = 0; }
+        ImGui::EndDisabled();
+    }
+
+    if (g.message[0]) ImGui::TextWrapped("%s", g.message);
+    ImGui::Spacing();
+    ImGui::Checkbox("Developer panels", &g.show_dev);
+    ImGui::TextDisabled("F1 hides this window.");
+    ImGui::End();
+}
+
 void draw_session() {
     ImGui::SetNextWindowSize(ImVec2(420, 260), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(420, 20), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("mgmp -- session")) { ImGui::End(); return; }
 
     const NetState st = net_state();
@@ -689,6 +847,8 @@ void ui_init() {
     g.toggle_vk = cfg().ui_key;
     _snprintf_s(g.addr, sizeof(g.addr), _TRUNCATE, "%s", cfg().net_addr);
     g.port = (int)cfg().net_port;
+    strncpy_s(g.name, lan_saved_name(), _TRUNCATE);
+    if (lan_last_addr()[0]) strncpy_s(g.addr, lan_last_addr(), _TRUNCATE);
 
     if (!g.enabled) {
         log_line("UI", "panel OFF (set ui.enabled in mgmp.json)");
@@ -761,8 +921,11 @@ void ui_on_swap(void* window) {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    draw_session();
-    draw_log();
+    draw_main();
+    if (g.show_dev) {
+        draw_session();
+        draw_log();
+    }
 
     ImGui::Render();
     // RenderDrawData backs up and restores the GL state it touches, which is

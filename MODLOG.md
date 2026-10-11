@@ -47,7 +47,8 @@ ever deleted** (by the mod, on either machine).
        Loads and hooks via Mewjector's `mods/` scan (verified 2026-10-11). Mewtator manifest path not yet verified.
 3. [ ] Steam transport: host opens a Steam lobby / rich presence; client joins via friends list or invite.
        Transport behind the existing interface; keep TCP for LAN.
-4. [ ] LAN: keep direct IP, add automatic host discovery on the local network.
+4. [~] LAN: keep direct IP, add automatic host discovery on the local network.
+       Built 2026-10-11 (not yet tested in game): "Mewgenics Online" window + Find LAN games.
 5. [ ] Save hardening: back up all saves before each session; never delete; refuse to write any
        non-`mgmp_coop.sav` file while a client; check whether Steam Cloud uploads `mgmp_coop.sav`.
 6. [ ] Packaging for Mewtator + README (credit upstream, Ko-fi link).
@@ -74,7 +75,22 @@ ever deleted** (by the mod, on either machine).
     (needs Settings > "Enable DLL Mod Support"). Mod folder = `D:\_Games\Mods\Mewtator\mods\MewgenicsOnline`
     (`info.json`, `mgmp.dll`, `mgmp.json`); `tools/deploy.ps1 -ModsDir ...` builds + copies (keeps an existing mgmp.json).
   - Mewtator has `concurrent_launches_enabled` — useful for two instances on one PC for LAN tests.
+- 2026-10-11: Mewtator path verified: `MewtatorManifest=...\mods\mewtator_dll_manifest.txt` written into
+  chainloader.ini by Mewtator; `[Mewtator] Loading: ...\MewgenicsOnline\mgmp.dll` OK; 54 resolved, 21 hooks live.
+- 2026-10-11: **LAN finder, copied from Gungeon Online's F8 window** (user asked).
+  - `src/net/mgmp_lan.{h,cpp}`: host answers UDP "MGMPLAN?" on the session port number (UDP 27600) with
+    "MGMPLAN!" + proto + TCP port + players + name. Search sends to 255.255.255.255, every adapter's subnet
+    broadcast (VPN adapters like Radmin would otherwise eat the global broadcast) and 127.0.0.1 (two copies on
+    one PC); accepts replies 3 s, re-asks each 1 s; dedupes per name+port preferring a non-loopback address.
+    Pumped from `session_update` (FrameBegin), non-blocking sockets, never touches the session or saves.
+  - Player name: `mgmp_user.ini` beside the DLL (`[player] name, last_addr`); default = Steam persona name via
+    flat API (`SteamAPI_SteamFriends_v018/v017` + `SteamAPI_ISteamFriends_GetPersonaName`), else Windows user.
+  - UI: new "Mewgenics Online" ImGui window (name + Save, Host on LAN, address + Join, Find LAN games list,
+    while connected: status, your LAN addresses, players, Leave). mgmp's session/log windows are behind a
+    "Developer panels" checkbox. `net_port()` added to mgmp_net.
 - TODO noticed:
+  - `net_join` does a blocking `connect()` on the game thread: a wrong/unreachable IP freezes the game up to
+    ~20 s. Make it non-blocking.
   - `tune::kHookSaveScum` disables the save-scum penalty even in plain single-player with the mod
     loaded. Should only apply while in a co-op session.
   - Hook compatibility: mgmp uses its own MinHook + verifies prologues by signature. Another Mewjector mod

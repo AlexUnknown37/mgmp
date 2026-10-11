@@ -14,6 +14,7 @@
 #include "mgmp_replay.h"
 #include "mgmp_session.h"
 #include "mgmp_ui.h"
+#include "mgmp_lan.h"
 
 #include <windows.h>
 #include <cstdio>
@@ -96,6 +97,7 @@ DWORD WINAPI init_thread(LPVOID) {
     wait_for_game_window();
 
     config_load(g_dll_dir);
+    lan_init(g_dll_dir);
     breadcrumb("init_thread: config loaded");
 
     log_init(config().log_path, tune::kConsole);

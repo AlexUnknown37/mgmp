@@ -81,6 +81,7 @@ void net_msg_release(NetMsg& m);
 bool net_host(uint16_t port);
 bool net_join(const char* addr, uint16_t port);
 void net_shutdown();
+uint16_t net_port();              // the port last passed to net_host / net_join
 
 NetState    net_state();
 NetRole     net_role();

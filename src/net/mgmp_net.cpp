@@ -429,8 +429,13 @@ void ensure_cs() {
 
 // ---------------------------------------------------------------------------
 
+namespace { uint16_t g_port = 0; }
+
+uint16_t net_port() { return g_port; }
+
 bool net_host(uint16_t port) {
     if (g.role != NetRole::None) return false;
+    g_port = port;
     ensure_cs();
     if (!wsa_init()) return false;
 
@@ -467,6 +472,7 @@ bool net_host(uint16_t port) {
 
 bool net_join(const char* addr, uint16_t port) {
     if (g.role != NetRole::None) return false;
+    g_port = port;
     ensure_cs();
     if (!wsa_init()) return false;
 
