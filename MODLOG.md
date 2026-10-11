@@ -149,3 +149,14 @@ ever deleted** (by the mod, on either machine).
     NPCMapDrawer: 0x1A94C0/0x1A9580 are type-name getters; registry vtable 0xEE65A0 (28 slots) -- not the opener.
   - Flicker (mod panel + Steam overlay): unknown yet. Added "frame pacing: N frames, M swaps" log (every 10 s,
     6 times) to see whether the game presents more/less than once per frame.
+- 2026-10-11: **Test 4** (guest clicked: map, storage, drag cat, cat info, build menu, store 1, store 2).
+  - Logged actions: HouseButton 0x205270 (shared by map/storage/build -- the dedupe only printed it once),
+    GenericButton 0x205430 (then the NPCOffice scene opened = store entry; body `mov rcx,[rcx+8]; jmp 0x27CCB0`),
+    GenericButton 0x285EB0 (inside the store), GenericButton 0x2053F0 (`jmp 0x27CD80`, store-related, left
+    unblocked in case it is the exit). 0x280270 never fired from a click.
+  - 0x205270 = generic House "toggle panel": the panel object is the capture at impl+0x10; opens via 0x203C80,
+    closes via 0x2049D0. Now the log prints the panel's RTTI class, and the guest is blocked for panels whose
+    class contains NPCMap / Furniture / Build (guesses -- confirm names next test). Store entry 0x205430 blocked.
+  - Frame pacing: 1.00 swaps per frame on both peers (~175 fps uncapped), 1.1 only at boot. So the flicker of the
+    mod panel + Steam overlay + game cursor (all drawn last in a frame) is NOT double presents. Open; next step is
+    isolating it (mod disabled / one copy / vsync on).

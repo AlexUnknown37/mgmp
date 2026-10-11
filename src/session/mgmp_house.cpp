@@ -3,6 +3,7 @@
 #include "mgmp_house.h"
 #include "mgmp_addresses.h"
 #include "mgmp_resolve.h"
+#include "mgmp_rtti.h"
 #include "mgmp_mem.h"
 #include "mgmp_log.h"
 #include "mgmp_net.h"
@@ -53,10 +54,21 @@ constexpr uintptr_t kButton_Callback = 0xF0;
 // pinned build, so an update turns the rule off instead of blocking at random.
 struct BlockedAction { uint32_t rva; const char* why; };
 const BlockedAction kGuestBlockedActions[] = {
-    // Entering an NPC office (a store) from the Boon County map: the lambda
-    // gets-or-creates the "NPCOffice" scene and adds the office component.
+    // A store's button on the Boon County map: `mov rcx,[rcx+8]; jmp 0x27CCB0`,
+    // into the NPC-office code next to the "NPCOffice" scene functions. Seen
+    // in test 4 directly before the NPCOffice scene appeared.
+    { 0x00205430, "Only the host can visit the stores." },
+    // Entering an NPC office: gets-or-creates the "NPCOffice" scene and adds the
+    // office component. Not seen from a click yet; kept as a second net.
     { 0x00280270, "Only the host can visit the stores." },
 };
+
+// The House's shared "open/close this panel" action (map, storage, build menu
+// all use it). The panel is the lambda's capture at impl+0x10 (`mov rbx,
+// [rbx+0x10]` before the open/close calls), so its C++ class says which panel.
+constexpr uint32_t kActionTogglePanel = 0x00205270;
+// Panels a guest may not open, by substring of the panel's RTTI class name.
+const char* const kGuestBlockedPanels[] = { "NPCMap", "Furniture", "Build" };
 
 struct House {
     bool installed = false;
@@ -190,15 +202,28 @@ uint32_t button_action(const void* button) {
     return (g.base && b > g.base && b - g.base < 0x2000000) ? (uint32_t)(b - g.base) : 0;
 }
 
-void note_button(const char* name, uint32_t action, bool house) {
+// For the shared panel action: the class name of the panel it opens ("" if not
+// that action or unreadable).
+void panel_class(const void* button, uint32_t action, char* out, size_t cap) {
+    out[0] = 0;
+    if (action != kActionTogglePanel) return;
+    const void* impl  = nullptr;
+    const void* panel = nullptr;
+    if (!mem_read((const uint8_t*)button + kButton_Callback, &impl, sizeof(impl)) || !impl) return;
+    if (!mem_read((const uint8_t*)impl + 0x10, &panel, sizeof(panel)) || !panel) return;
+    if (!rtti_class_name(panel, out, cap)) out[0] = 0;
+}
+
+void note_button(const char* name, uint32_t action, const char* panel, bool house) {
     char key[64];
-    _snprintf_s(key, sizeof(key), _TRUNCATE, "%s@%08X", name, action);
+    _snprintf_s(key, sizeof(key), _TRUNCATE, "%s@%08X%s", name, action, panel);
     for (uint32_t i = 0; i < g.seen_count; ++i)
         if (strcmp(g.seen[i], key) == 0) return;
     if (g.seen_count < 96) strncpy_s(g.seen[g.seen_count++], key, _TRUNCATE);
     // Info while in the House: these lines are how the guest blocklist is built.
     log_line_lvl(house ? LogLevel::Info : LogLevel::Trace, "HOUSE",
-                 "button pressed: '%s' action %08X", name, action);
+                 "button pressed: '%s' action %08X%s%s", name, action,
+                 panel[0] ? " panel " : "", panel);
 }
 
 void __fastcall h_click(void* button, bool force) {
@@ -206,7 +231,9 @@ void __fastcall h_click(void* button, bool force) {
     if (button && mem_read_std_string((const uint8_t*)button + kButton_Name, name, sizeof(name))) {
         const bool house  = leave_scene_live("House");
         const uint32_t act = button_action(button);
-        note_button(name, act, house);
+        char panel[96];
+        panel_class(button, act, panel, sizeof(panel));
+        note_button(name, act, panel, house);
         if (is_guest() && house) {
             for (const char* p : kGuestBlockedButtons) {
                 if (strncmp(name, p, strlen(p)) == 0) {
@@ -217,6 +244,14 @@ void __fastcall h_click(void* button, bool force) {
             if (act && resolve_is_pinned_build()) {
                 for (const BlockedAction& b : kGuestBlockedActions) {
                     if (b.rva == act) { set_toast(b.why); return; }
+                }
+                if (panel[0]) {
+                    for (const char* p : kGuestBlockedPanels) {
+                        if (strstr(panel, p)) {
+                            set_toast("The guest can look at storage and cats -- the map and building are the host's.");
+                            return;
+                        }
+                    }
                 }
             }
         }
