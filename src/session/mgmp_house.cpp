@@ -58,17 +58,25 @@ const BlockedAction kGuestBlockedActions[] = {
     // into the NPC-office code next to the "NPCOffice" scene functions. Seen
     // in test 4 directly before the NPCOffice scene appeared.
     { 0x00205430, "Only the host can visit the stores." },
+    // The other store button on the map: `mov rcx,[rcx+8]; jmp 0x27CD80`, the
+    // sibling of 0x27CCB0 (test 5: store 2 still opened through it).
+    { 0x002053F0, "Only the host can visit the stores." },
     // Entering an NPC office: gets-or-creates the "NPCOffice" scene and adds the
     // office component. Not seen from a click yet; kept as a second net.
     { 0x00280270, "Only the host can visit the stores." },
 };
 
-// The House's shared "open/close this panel" action (map, storage, build menu
-// all use it). The panel is the lambda's capture at impl+0x10 (`mov rbx,
-// [rbx+0x10]` before the open/close calls), so its C++ class says which panel.
-constexpr uint32_t kActionTogglePanel = 0x00205270;
-// Panels a guest may not open, by substring of the panel's RTTI class name.
-const char* const kGuestBlockedPanels[] = { "NPCMap", "Furniture", "Build" };
+// The House's shared "open/close this panel" action (map, storage, build menu,
+// stores, cat stats all use it). The panel is the lambda's capture at impl+0x10
+// (`mov rbx,[rbx+0x10]` before the open/close calls). Every panel is a
+// glaiel::HouseDrawerPanel; what tells them apart is the panel's name, a
+// std::string at +0xA8 that the open/close functions (0x204920 / 0x2049D0)
+// append to "DrawerOpen_" / "DrawerClose_" for the sound. resources.gpak holds
+// exactly five: Map, Store, Furniture, Storage, Stats.
+constexpr uint32_t  kActionTogglePanel = 0x00205270;
+constexpr uintptr_t kPanel_Name        = 0xA8;
+// The only panels a guest may open: storage, and the cat information.
+const char* const kGuestAllowedPanels[] = { "Storage", "Stats" };
 
 struct House {
     bool installed = false;
@@ -84,6 +92,11 @@ struct House {
     // Menu detection, refreshed every few frames.
     bool     menu_open = false;
     bool     in_house  = false;
+    // Cursor visibility, debounced: the scene list can read oddly for a single
+    // refresh during a transition, and every flip is a blink on the peer.
+    bool     show_cursor = false;
+    bool     want_cursor = false;
+    uint32_t want_streak = 0;
     uint32_t frame = 0;
     uint64_t scene_sig = 0;
 
@@ -117,9 +130,11 @@ bool is_guest() { return net_active() && net_role() == NetRole::Client; }
 bool is_host()  { return net_active() && net_role() == NetRole::Host; }
 
 void set_toast(const char* text) {
+    const uint64_t now = GetTickCount64();
+    const bool repeat = strcmp(g.toast, text) == 0 && now < g.toast_until;
     strncpy_s(g.toast, text, _TRUNCATE);
-    g.toast_until = GetTickCount64() + 4000;
-    log_line("HOUSE", "%s", text);
+    g.toast_until = now + 4000;
+    if (!repeat) log_line("HOUSE", "%s", text);
 }
 
 // --- finding a function by the string literal it names -----------------------
@@ -202,8 +217,9 @@ uint32_t button_action(const void* button) {
     return (g.base && b > g.base && b - g.base < 0x2000000) ? (uint32_t)(b - g.base) : 0;
 }
 
-// For the shared panel action: the class name of the panel it opens ("" if not
-// that action or unreadable).
+// For the shared panel action: the name of the drawer panel it opens ("Map",
+// "Storage", ...), "" if not that action or unreadable. The class is checked
+// first so a moved offset reads as "" rather than as some other string.
 void panel_class(const void* button, uint32_t action, char* out, size_t cap) {
     out[0] = 0;
     if (action != kActionTogglePanel) return;
@@ -211,7 +227,9 @@ void panel_class(const void* button, uint32_t action, char* out, size_t cap) {
     const void* panel = nullptr;
     if (!mem_read((const uint8_t*)button + kButton_Callback, &impl, sizeof(impl)) || !impl) return;
     if (!mem_read((const uint8_t*)impl + 0x10, &panel, sizeof(panel)) || !panel) return;
-    if (!rtti_class_name(panel, out, cap)) out[0] = 0;
+    char cls[96] = {};
+    if (!rtti_class_name(panel, cls, sizeof(cls)) || !strstr(cls, "HouseDrawerPanel")) return;
+    if (!mem_read_std_string((const uint8_t*)panel + kPanel_Name, out, cap)) out[0] = 0;
 }
 
 void note_button(const char* name, uint32_t action, const char* panel, bool house) {
@@ -246,11 +264,14 @@ void __fastcall h_click(void* button, bool force) {
                     if (b.rva == act) { set_toast(b.why); return; }
                 }
                 if (panel[0]) {
-                    for (const char* p : kGuestBlockedPanels) {
-                        if (strstr(panel, p)) {
-                            set_toast("The guest can look at storage and cats -- the map and building are the host's.");
-                            return;
-                        }
+                    bool allowed = false;
+                    for (const char* p : kGuestAllowedPanels)
+                        if (strcmp(panel, p) == 0) { allowed = true; break; }
+                    if (!allowed) {
+                        set_toast(strcmp(panel, "Store") == 0
+                                      ? "Only the host can visit the stores."
+                                      : "The guest can look at storage and cats -- the rest is the host's.");
+                        return;
                     }
                 }
             }
@@ -289,6 +310,15 @@ void refresh_menu_state() {
         if (!base) menu = true;
     }
     g.menu_open = menu;
+    if (n) {
+        bool house = false;
+        for (uint32_t i = 0; i < n; ++i) if (strcmp(names[i], "House") == 0) { house = true; break; }
+        g.in_house = house;
+        const bool want = house && !menu;
+        if (want == g.want_cursor) ++g.want_streak;
+        else { g.want_cursor = want; g.want_streak = 1; }
+        if (g.want_streak >= 3) g.show_cursor = g.want_cursor;
+    }
     if (n && sig != g.scene_sig) {
         g.scene_sig = sig;
         char line[512] = {};
@@ -310,8 +340,7 @@ void pump_cursor() {
     out.owns_turn = 1;
     // Shown only while this player is in the House with no menu open (storage,
     // a shop, ...). Battles use the HUD path above; everywhere else is hidden.
-    g.in_house = (g.frame % 6 == 0) ? leave_scene_live("House") : g.in_house;
-    if (g.in_house && !g.menu_open) {
+    if (g.show_cursor) {
         overlay_local_pointer(out.nx, out.ny, out.mode);
     } else {
         // "Hidden" -- see overlay_on_message. The position stays inside the

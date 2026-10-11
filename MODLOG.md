@@ -160,3 +160,12 @@ ever deleted** (by the mod, on either machine).
   - Frame pacing: 1.00 swaps per frame on both peers (~175 fps uncapped), 1.1 only at boot. So the flicker of the
     mod panel + Steam overlay + game cursor (all drawn last in a frame) is NOT double presents. Open; next step is
     isolating it (mod disabled / one copy / vsync on).
+- 2026-10-11: **Test 5.** Store 1 blocked OK. Every House panel is `glaiel::HouseDrawerPanel` (class useless).
+  Panel name = std::string at panel+0xA8 (0x204920 builds "DrawerOpen_" + it for the sound). resources.gpak
+  holds exactly DrawerOpen_/Close_ {Map, Store, Furniture, Storage, Stats}. Guest now uses an ALLOW-list:
+  only Storage and Stats (cat info) open; Map, Store, Furniture (build menu) blocked. Store 2 = 0x2053F0
+  (`jmp 0x27CD80`) blocked too. Toast log de-duplicated (a held button spammed it).
+  - User clarified: the GUEST's ghost cursor (seen on the host) flashes; the panel/overlay flicker only happens
+    with two games on one PC (GPU contention at ~175 fps each; not seen with one copy). Cursor visibility is now
+    decided from one scene-list read (House present, no menu scene) and only flips after 3 identical
+    refreshes (~18 frames).
