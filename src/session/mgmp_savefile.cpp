@@ -14,6 +14,7 @@
 #include "mgmp_catsync.h"
 #include "mgmp_invsync.h"
 #include "mgmp_runhist.h"
+#include "mgmp_leave.h"   // leave_scene_live, leave_request_local
 
 #include <windows.h>
 #include <shlobj.h>
@@ -269,6 +270,24 @@ struct State {
     const void** director_slot = nullptr;
     bool     said_no_flush = false;
     bool     said_mid_node = false;
+    // The save this process last loaded through MewDirector::init, recorded
+    // whatever the role. Lets a player who loaded their save (and is standing
+    // in the House) BEFORE pressing Host still share it -- have_slot alone is
+    // only ever set by a click on the save screen.
+    bool     have_loaded     = false;
+    char     loaded_name[64] = {};
+    // HOUSE <-> ADVENTURE HANDOFF. The House is not replicated, so when the
+    // host walks out of it into an adventure (or comes home from one) the
+    // client's copy is simply in the wrong place. The host re-publishes its
+    // save as a fresh pick at that moment; the client drops back to the menu and
+    // reloads it, exactly as if the host had picked a slot again.
+    enum class Handoff { None, ToAdventure, ToHouse };
+    Handoff  handoff        = Handoff::None;
+    uint32_t handoff_frames = 0;
+    bool     host_in_house  = false;   // the House scene was live last frame
+    bool     host_seen_adv  = false;   // an adventure was loaded since the last publish
+    // --- client ---
+    bool     must_rejoin    = false;   // a fresh save arrived while in a run/House
 
     // --- client ---
     uint8_t* blob      = nullptr;
@@ -674,6 +693,48 @@ void savefile_pump() {
     if (g.play_cooldown) --g.play_cooldown;
 
     if (!g.on || g.is_client) return;
+
+    // HOUSE <-> ADVENTURE. Only once a save is out: before that the first
+    // publish covers it. "Left the House" is the House scene going away while
+    // an adventure loads; "came home" is the House scene coming back.
+    if (g.published && net_active()) {
+        const bool house = leave_scene_live("House");
+        if (adventure_is_loaded_impl()) g.host_seen_adv = true;
+        if (g.host_in_house && !house) {
+            g.handoff = State::Handoff::ToAdventure;
+            g.handoff_frames = 0;
+            log_line("SAVEFILE", "the host left the House -- will send the new "
+                                 "adventure once it is standing on the map");
+        } else if (!g.host_in_house && house && g.host_seen_adv &&
+                   g.handoff == State::Handoff::None) {
+            g.handoff = State::Handoff::ToHouse;
+            g.handoff_frames = 0;
+            log_line("SAVEFILE", "the host is back in the House -- will send its "
+                                 "save once the game has written it");
+        }
+        g.host_in_house = house;
+
+        bool ready = false;
+        ++g.handoff_frames;
+        if (g.handoff == State::Handoff::ToAdventure)
+            ready = adventure_is_loaded_impl() && follow_on_map() && g.handoff_frames > 60;
+        else if (g.handoff == State::Handoff::ToHouse)
+            ready = g.handoff_frames > 300;        // ~5 s for the game's own save
+        if (ready) {
+            // A new run as far as the per-run dedupe caches are concerned --
+            // the same forget a slot click does.
+            catsync_forget();
+            invsync_forget();
+            runhist_forget();
+            if (publish(kNoPeer, /*fresh=*/true)) {
+                g.host_seen_adv = false;
+                log_line("SAVEFILE", "handoff sent -- the client will reload into %s",
+                         g.handoff == State::Handoff::ToAdventure ? "the adventure" : "the House");
+                g.handoff = State::Handoff::None;
+            }
+        }
+    }
+
     if (g.published) return;
     if (!net_active()) return;
 
@@ -686,6 +747,23 @@ void savefile_pump() {
     // It is reachable: `mgmp_loader.exe --attach <pid>` is documented in the
     // README, and a host who attached to a game that was already in a run has
     // no click for the hook to see. Every drop site must say what it dropped.
+    if (!g.have_slot && g.have_loaded) {
+        g.have_slot = true;
+        strncpy_s(g.name, g.loaded_name, _TRUNCATE);
+        // steamcampaign01.sav -> slot 0. Only a label for the client: it loads
+        // from mgmp_coop.sav whichever slot this says.
+        g.slot = 0;
+        if (const char* d = strpbrk(g.name, "0123456789")) {
+            int n = atoi(d);
+            if (n >= 1 && n <= (int)kMaxSlots) g.slot = (uint32_t)(n - 1);
+        }
+        g.published     = false;
+        g.publish_tries = 0;
+        g.click_mtime   = 0;
+        g.host_in_house = leave_scene_live("House");
+        log_line("SAVEFILE", "this host loaded '%s' before hosting -- sharing that save "
+                             "(as last written to disk) with the client", g.name);
+    }
     if (!g.have_slot) {
         if (++g.publish_tries == 300) {          // ~5 s of a live session
             log_line_lvl(LogLevel::Error, "SAVEFILE",
@@ -750,6 +828,10 @@ bool savefile_on_slot_click(void* ss, int slot) {
     g.have_slot = true;
     g.slot      = (uint32_t)slot;
     strncpy_s(g.name, names.v[slot], _TRUNCATE);
+    // A slot click is its own fresh publish; any handoff in flight is moot.
+    g.handoff       = State::Handoff::None;
+    g.host_seen_adv = false;
+    g.host_in_house = false;
     g.published     = false;
     g.publish_tries = 0;
     g.click_mtime   = 0;
@@ -851,11 +933,16 @@ void savefile_on_message(const SaveFileMsg& m) {
         // either of them can act on. The blob is kept and applies the moment the
         // player gets back to the menu -- but nothing can drag them there, so
         // this has to be said out loud.
-        if (adventure_is_loaded_impl())
-            log_line_lvl(LogLevel::Error, "SAVEFILE",
-                     "!! this peer is INSIDE a run and a save can only be applied "
-                     "from the save-selection screen -- quit to the main menu and "
-                     "the host's new run will load on its own");
+        // Not on a menu (inside a run, or in the House copy): arm the leave
+        // path, so opening the pause menu presses Quit To Menu, and the
+        // auto-Play then carries this peer into the host's new save.
+        if (!leave_scene_live("MainMenu") && !leave_scene_live("SaveSelectionScreen")) {
+            g.must_rejoin = true;
+            leave_request_local();
+            log_line_lvl(LogLevel::Warn, "SAVEFILE",
+                     "the host moved (House <-> adventure) -- press Esc and the mod "
+                     "will quit to the menu and load you into the host's game");
+        }
     }
 
     if (g.blob) free(g.blob);
@@ -979,7 +1066,21 @@ int savefile_autoselect(void* ss) {
 
     g.pending = false;
     g.applied = true;
+    g.must_rejoin = false;
     return slot;
+}
+
+bool savefile_must_rejoin() { return g.on && g.is_client && g.must_rejoin; }
+
+void savefile_note_loaded(const void* name) {
+    char n[64] = {};
+    if (!name || !mem_read_std_string(name, n, sizeof(n))) return;
+    const size_t len = strlen(n);
+    if (len < 5 || _stricmp(n + len - 4, ".sav") != 0) return;
+    if (_stricmp(n, kCoopSaveName) == 0) return;   // the client's copy, never shared
+    strncpy_s(g.loaded_name, n, _TRUNCATE);
+    g.have_loaded = true;
+    log_line("SAVEFILE", "save loaded: '%s'", n);
 }
 
 const void* savefile_redirect_load() {

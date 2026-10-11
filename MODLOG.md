@@ -88,7 +88,21 @@ ever deleted** (by the mod, on either machine).
   - UI: new "Mewgenics Online" ImGui window (name + Save, Host on LAN, address + Join, Find LAN games list,
     while connected: status, your LAN addresses, players, Leave). mgmp's session/log windows are behind a
     "Developer panels" checkbox. `net_port()` added to mgmp_net.
+- 2026-10-11: **First LAN test (two copies, one PC)** -- with the OLD dll (panel host/join, new UI not deployed yet).
+  Connected fine (proto 27, handshake both sides). Guest did nothing: the host had loaded its save and was in the
+  House BEFORE pressing host, and mgmp only publishes on a save-slot click ("this host has not chosen a save slot
+  in this process"). Guest sat on the save screen waiting.
+  - Fix: `h_MewDirInit` calls `savefile_note_loaded(name)` on every non-redirected load (hook is live even with
+    role off); `savefile_pump` adopts that name as the slot when there was no click, and publishes it.
+  - **House handoff** (user wants the guest in the host's House): the House is NOT replicated (mgmp scope). The
+    guest gets a COPY of the host's save, so it lands in the same House as last written to disk. When the host
+    leaves the House for an adventure (House scene gone -> adventure loaded and on the map) or comes home (House
+    scene back after an adventure was seen, +5 s for the game's own save), the host re-publishes as `fresh`; a guest
+    not on a menu gets `leave_request_local()` (Esc -> mod presses Quit To Menu) + a UI banner, then auto-Play
+    loads the new save. `leave_scene_live(name)` added to mgmp_leave. Not yet tested.
 - TODO noticed:
+  - Live House sync (seeing each other's House actions) is out of scope for now: the house sim draws RNG with no
+    re-seed (CLAUDE.md "The house"), so only host-authoritative state sync could work.
   - `net_join` does a blocking `connect()` on the game thread: a wrong/unreachable IP freezes the game up to
     ~20 s. Make it non-blocking.
   - `tune::kHookSaveScum` disables the save-scum penalty even in plain single-player with the mod

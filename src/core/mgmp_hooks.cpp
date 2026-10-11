@@ -638,6 +638,7 @@ void __fastcall h_SaveSelUpdate(void* self) {
 void* __fastcall h_MewDirInit(void* self, void* name) {
     if (const void* sub = savefile_redirect_load())
         return o_MewDirInit(self, (void*)sub);
+    savefile_note_loaded(name);
     return o_MewDirInit(self, name);
 }
 

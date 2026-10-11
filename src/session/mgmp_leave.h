@@ -112,4 +112,8 @@ void leave_status(char* out, size_t out_size);
 // because the debug panel should be able to show it.
 bool leave_in_run();
 
+// Whether the game has a scene by this name loaded and not being torn down
+// ("House", "MainMenu", "SaveSelectionScreen"). A fresh read every call.
+bool leave_scene_live(const char* name);
+
 } // namespace mgmp

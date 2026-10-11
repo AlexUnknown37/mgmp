@@ -24,6 +24,7 @@
 #include "mgmp_combatlock.h"
 #include "mgmp_leave.h"
 #include "mgmp_lan.h"
+#include "mgmp_savefile.h"
 
 // Declared by imgui_impl_win32.h's owner rather than the header itself.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
@@ -619,6 +620,10 @@ void draw_main() {
             ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());
             ImGui::TextDisabled("Your own saves are never touched; the host's run is kept in mgmp_coop.sav.");
         }
+        if (savefile_must_rejoin())
+            ImGui::TextColored(level_colour(LogLevel::Warn),
+                               "The host moved. Press Esc -- the mod quits to the menu\n"
+                               "and loads you into the host's game.");
         if (lockstep_halted())
             ImGui::TextColored(level_colour(LogLevel::Error),
                                "HALTED -- the two games disagreed. Open the developer panels for details.");

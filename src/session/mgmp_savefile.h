@@ -105,6 +105,14 @@ void savefile_on_message(const SaveFileMsg& m);
 // never redirected.
 const void* savefile_redirect_load();
 
+// Every load that is NOT redirected: records which save file this process has
+// open (a std::string*), so a host who loaded before pressing Host can share it.
+void savefile_note_loaded(const void* name);
+
+// Client: the host moved between the House and an adventure and this peer has
+// to go back through the menu to follow. The UI shows a banner while true.
+bool savefile_must_rejoin();
+
 // Is an adventure loaded on THIS peer? Read off the MewDirector's run cat-id
 // list ({cap,count,data} at +1464/+1468/+1472), the same fields catsync uses,
 // with the same implausibility bound -- so a drifted offset answers "no" rather

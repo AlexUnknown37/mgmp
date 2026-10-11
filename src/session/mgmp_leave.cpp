@@ -519,6 +519,14 @@ void leave_status(char* out, size_t out_size) {
                                : "  [pause menu NOT seen yet]");
 }
 
+bool leave_scene_live(const char* name) {
+    SceneList s{};
+    if (!read_scenes(s)) return false;
+    for (uint32_t i = 0; i < s.count; ++i)
+        if (!s.dying[i] && strcmp(s.name[i], name) == 0) return true;
+    return false;
+}
+
 void leave_request_local() {
     ensure_state();
     g.pending      = true;
