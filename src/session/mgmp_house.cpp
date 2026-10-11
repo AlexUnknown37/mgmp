@@ -117,6 +117,7 @@ struct House {
     uint64_t esc_next_at = 0;
     bool     esc_down    = false;
     uint64_t esc_up_at   = 0;
+    bool     quit_wanted = false;   // set by pump_rejoin, done in a Button::update
 
     // Button name + action seen, logged once each (discovery for the blocklist).
     char     seen[96][64] = {};
@@ -428,9 +429,12 @@ void pump_rejoin() {
     // menu, mgmp_leave presses Quit To Menu) -- which needs the window focused.
     g.esc_next_at = now + 6000;
     ++g.esc_presses;
-    if (fn_quit_to_menu quit = quit_to_menu_fn()) {
+    if (quit_to_menu_fn()) {
+        // Done from the next Button::update (inside the scene update, like a
+        // real button press), not from here: FrameBegin is outside it, and
+        // starting the transition from FrameBegin crashed the game.
+        g.quit_wanted = true;
         log_line("HOUSE", "quitting to the menu to follow the host (%u/3)", g.esc_presses);
-        quit(nullptr);
     } else {
         post_escape(true);
         g.esc_down  = true;
@@ -455,6 +459,14 @@ void house_install(uintptr_t base) {
 }
 
 void house_note_swap() { ++g.swaps; }
+
+void house_on_button_update(void* button) {
+    (void)button;
+    if (!g.quit_wanted) return;
+    g.quit_wanted = false;
+    if (!savefile_must_rejoin()) return;
+    if (fn_quit_to_menu quit = quit_to_menu_fn()) quit(nullptr);
+}
 
 void house_pump() {
     if (++g.frame % 6 == 0) refresh_menu_state();

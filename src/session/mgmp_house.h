@@ -39,6 +39,10 @@ void house_note_battle_cursor();
 // From the swap takeover, once per present (flicker diagnosis).
 void house_note_swap();
 
+// From the Button::update hook, after the original: where a guest that must
+// follow the host actually starts the quit-to-menu transition.
+void house_on_button_update(void* button);
+
 // One line for the UI ("" when nothing to say): why a guest click was refused.
 const char* house_toast();
 

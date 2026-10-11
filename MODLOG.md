@@ -186,3 +186,9 @@ ever deleted** (by the mod, on either machine).
   director+0x38 transitioning, current scene = director+0x18->+8, then QuitToMenuTransition creator 0x1C0040,
   r8/r9 unused). Pinned build + first 7 bytes checked; Escape kept only as fallback. Called from house_pump
   (FrameBegin, game thread), max 3 tries 6 s apart.
+- 2026-10-11: **Test 8.** Guest received the new day and called the quit-to-menu action (0x1BF4F0) from
+  house_pump -> game closed itself at once (clean DLL detach, no WER 1000 event, so likely the game's own fatal
+  path). Cause assumed: called from FrameBegin, outside the scene update. Now deferred: pump sets quit_wanted,
+  and `house_on_button_update` (called from mgmp's Button::update hook, after the original -- where real button
+  clicks start transitions) makes the call. Untested. If this still crashes, drop the direct call.
+  - Cursor drawer fix verified working in logs ("drawer open" on Stats).

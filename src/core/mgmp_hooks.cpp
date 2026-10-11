@@ -57,6 +57,7 @@
 
 #include <windows.h>
 #include "MinHook.h"
+#include "mgmp_house.h"
 
 #include <cstdio>
 #include <cstring>
@@ -582,6 +583,11 @@ void __fastcall h_ButtonUpdate(void* self) {
     // INTO the host's run, Quit To Menu in the pause sidebar gets it back
     // OUT when the host has left. Same slot, same trampoline reasoning.
     leave_on_button_update(self);
+
+    // Our fork: a guest following the host (End Day, Force Sync) quits to the
+    // menu from here -- inside a scene update, where the game's own buttons
+    // start that transition. Calling it from FrameBegin crashed the game.
+    house_on_button_update(self);
 }
 
 // The aim preview turns the acting cat while a decision is held, writing the
