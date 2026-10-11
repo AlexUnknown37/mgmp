@@ -179,3 +179,10 @@ ever deleted** (by the mod, on either machine).
   clicks (impl+0x10); panel+0x50 = open flag (tested/cleared by 0x203C80; assumption, logged at Trace
   "drawer open/closed"). Sender hides while any drawer is open; receiver draws no peer pointer while its own
   drawer is open (`house_local_view_shifted`).
+- 2026-10-11: **Test 7.** Host End Day -> new day sent fine; guest did nothing. Guest log lost: both copies started
+  in the same second and shared one stamped log name -> log names now carry the PID. Likely cause: the posted
+  Escape is ignored while the guest window is unfocused (Force Sync worked because the guest had just been
+  clicked). Fix: call the game's own capture-less "quit to main menu" lambda body, RVA 0x1BF4F0 (checks
+  director+0x38 transitioning, current scene = director+0x18->+8, then QuitToMenuTransition creator 0x1C0040,
+  r8/r9 unused). Pinned build + first 7 bytes checked; Escape kept only as fallback. Called from house_pump
+  (FrameBegin, game thread), max 3 tries 6 s apart.

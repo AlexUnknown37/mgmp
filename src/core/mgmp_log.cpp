@@ -140,13 +140,13 @@ void log_init(const wchar_t* path, bool console) {
         const wchar_t* slash = wcsrchr(path, L'\\');
         if (dot && (!slash || dot > slash)) {
             int stem = (int)(dot - path);
-            _snwprintf_s(stamped, _TRUNCATE, L"%.*s_%04d%02d%02d-%02d%02d%02d%s",
+            _snwprintf_s(stamped, _TRUNCATE, L"%.*s_%04d%02d%02d-%02d%02d%02d_%lu%s",
                          stem, path, t.wYear, t.wMonth, t.wDay,
-                         t.wHour, t.wMinute, t.wSecond, dot);
+                         t.wHour, t.wMinute, t.wSecond, GetCurrentProcessId(), dot);
         } else {
-            _snwprintf_s(stamped, _TRUNCATE, L"%s_%04d%02d%02d-%02d%02d%02d",
+            _snwprintf_s(stamped, _TRUNCATE, L"%s_%04d%02d%02d-%02d%02d%02d_%lu",
                          path, t.wYear, t.wMonth, t.wDay,
-                         t.wHour, t.wMinute, t.wSecond);
+                         t.wHour, t.wMinute, t.wSecond, GetCurrentProcessId());
         }
 
         // _SH_DENYWR, not fopen's exclusive default: the whole point of this

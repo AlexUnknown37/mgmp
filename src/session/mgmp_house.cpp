@@ -388,6 +388,25 @@ void pump_cursor() {
 
 // --- the guest's trip back through the menu -------------------------------------
 
+// The game's own "quit to the main menu" action: a capture-less lambda body at
+// RVA 0x1BF4F0 that checks the director is not already transitioning, takes the
+// current scene and adds a QuitToMenuTransition to it (creator 0x1C0040, whose
+// r8/r9 are unused). Calling it is what the game does for that button -- no
+// pause menu, no keyboard, so it works while the window is not focused (a
+// posted Escape did not: the game ignores keys in an unfocused window).
+// Pinned build only, and the first bytes are checked.
+typedef void (__fastcall* fn_quit_to_menu)(void* unused);
+constexpr uint32_t kRva_QuitToMenuAction = 0x001BF4F0;
+const uint8_t kQuitToMenuBytes[] = { 0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05 };
+
+fn_quit_to_menu quit_to_menu_fn() {
+    if (!g.base || !resolve_is_pinned_build()) return nullptr;
+    const uint8_t* p = (const uint8_t*)(g.base + kRva_QuitToMenuAction);
+    uint8_t got[sizeof(kQuitToMenuBytes)] = {};
+    if (!mem_read(p, got, sizeof(got)) || memcmp(got, kQuitToMenuBytes, sizeof(got)) != 0) return nullptr;
+    return (fn_quit_to_menu)p;
+}
+
 void post_escape(bool down) {
     HWND hwnd = (HWND)ui_hwnd();
     if (!hwnd) return;
@@ -404,16 +423,22 @@ void pump_rejoin() {
     if (leave_scene_live("MainMenu") || leave_scene_live("SaveSelectionScreen")) return;
     if (g.esc_presses >= 3 || now < g.esc_next_at || g.esc_down) return;
 
-    // One Escape opens the pause menu; mgmp_leave (armed by savefile) then
-    // presses Quit To Menu, and the auto-Play loads the host's new save. Spaced
-    // out so a second press never lands on the pause menu we just opened.
-    post_escape(true);
-    g.esc_down    = true;
-    g.esc_up_at   = now + 80;
+    // Quit to the menu directly; the auto-Play then loads the host's new save.
+    // Fallback when the action cannot be verified: an Escape (opens the pause
+    // menu, mgmp_leave presses Quit To Menu) -- which needs the window focused.
     g.esc_next_at = now + 6000;
     ++g.esc_presses;
-    log_line("HOUSE", "pressing Escape to go back through the menu and follow the host (%u/3)",
-             g.esc_presses);
+    if (fn_quit_to_menu quit = quit_to_menu_fn()) {
+        log_line("HOUSE", "quitting to the menu to follow the host (%u/3)", g.esc_presses);
+        quit(nullptr);
+    } else {
+        post_escape(true);
+        g.esc_down  = true;
+        g.esc_up_at = now + 80;
+        log_line("HOUSE", "pressing Escape to go back through the menu and follow the host (%u/3)"
+                          " -- the quit-to-menu action is not available on this build",
+                 g.esc_presses);
+    }
 }
 
 } // namespace
