@@ -911,6 +911,7 @@ bool ui_captures_input() {
 
 void ui_on_swap(void* window) {
     (void)window;
+    house_note_swap();
     if (!g.enabled || g.failed) return;
 
     // Deferred from ui_init when there was no current DC then.

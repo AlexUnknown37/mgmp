@@ -134,3 +134,18 @@ ever deleted** (by the mod, on either machine).
     only House or battle), base set in kBaseScenes, and the hide sentinel
     otherwise. Scene-set changes logged at Trace ("HOUSE scenes: ...") to learn menu scene names.
   - Known gap: blocking Depart happens after the guest has picked a team (0x3B13F0 continues after the null).
+- 2026-10-11: **Test 3 findings + fixes.**
+  - Force Sync "logged the guest out": NOT the sync. The hidden-cursor sentinel nx = -1 fails `dec_cursor`'s
+    strict `nx > -1.0f` bound -> host logs "undecodable CURSOR frame -- closing" and drops the peer every time a
+    cursor went hidden (menus). Now hidden = `mode == kCursorHiddenMode (0xFF)` with nx = ny = 0.
+    Lesson: mgmp's decoders close the connection on any out-of-range field.
+  - The main menu loads `test00.sav` through MewDirector::init by itself -> `savefile_note_loaded` now only
+    records names containing "campaign".
+  - Guest could open the Boon County map and stores. House objects are Buttons named 'HouseButton' /
+    'GenericButton'; the name is useless. Button::Click (0x97E8E0) runs `[[button+0xF0]]+0x10` = the lambda
+    body; its RVA identifies the action. Store entry from the map = lambda 0x280270 (get-or-create scene
+    "NPCOffice", add office component) -> blocked for the guest (pinned-build only). Every House button press is
+    now logged at Info as "button pressed: '<name>' action <RVA>" so the map opener can be identified next test.
+    NPCMapDrawer: 0x1A94C0/0x1A9580 are type-name getters; registry vtable 0xEE65A0 (28 slots) -- not the opener.
+  - Flicker (mod panel + Steam overlay): unknown yet. Added "frame pacing: N frames, M swaps" log (every 10 s,
+    6 times) to see whether the game presents more/less than once per frame.

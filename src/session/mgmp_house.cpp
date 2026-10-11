@@ -12,6 +12,7 @@
 #include "mgmp_leave.h"
 #include "mgmp_overlay.h"
 #include "mgmp_ui.h"
+#include "mgmp_resolve.h"
 
 #include "MinHook.h"
 
@@ -40,7 +41,22 @@ const char* const kGuestBlockedButtons[] = {
     "Shop_Buy", "Furniture", "Button_HouseBossResummon",
 };
 
-constexpr uintptr_t kButton_Name = 504;   // std::string, see CLAUDE.md "The main menu"
+constexpr uintptr_t kButton_Name     = 504;    // std::string, see CLAUDE.md "The main menu"
+// Button::Click (RVA 0x97E8E0) calls the button's callback as
+// `mov rcx,[button+0xF0]; call [[rcx]+0x10]` -- a std::function-style impl whose
+// vtable slot 2 is the lambda body. That body's address says WHAT the button
+// does, which the name ("HouseButton", "GenericButton") does not.
+constexpr uintptr_t kButton_Callback = 0xF0;
+
+// What a guest may not do in the House, by callback body RVA. Pinned to build
+// 1.1.21239 (exe SHA256 4127cd6a...): only applied when the resolver reports the
+// pinned build, so an update turns the rule off instead of blocking at random.
+struct BlockedAction { uint32_t rva; const char* why; };
+const BlockedAction kGuestBlockedActions[] = {
+    // Entering an NPC office (a store) from the Boon County map: the lambda
+    // gets-or-creates the "NPCOffice" scene and adds the office component.
+    { 0x00280270, "Only the host can visit the stores." },
+};
 
 struct House {
     bool installed = false;
@@ -71,9 +87,16 @@ struct House {
     bool     esc_down    = false;
     uint64_t esc_up_at   = 0;
 
-    // Button names seen, logged once each (discovery for the blocklist).
-    char     seen[96][48] = {};
+    // Button name + action seen, logged once each (discovery for the blocklist).
+    char     seen[96][64] = {};
     uint32_t seen_count = 0;
+
+    uintptr_t base = 0;
+
+    // Flicker diagnosis: swaps per game frame.
+    uint32_t swaps = 0, frames = 0;
+    uint64_t rate_since = 0;
+    uint32_t rate_reports = 0;
 };
 
 House g;
@@ -155,22 +178,45 @@ void* __fastcall h_depart(void* scene, void* a2, void* a3, void* a4) {
     return g.o_depart(scene, a2, a3, a4);
 }
 
-void note_button(const char* name) {
+// RVA of the lambda body a button runs when clicked, 0 if unreadable.
+uint32_t button_action(const void* button) {
+    const void* impl = nullptr;
+    const void* vt   = nullptr;
+    const void* body = nullptr;
+    if (!mem_read((const uint8_t*)button + kButton_Callback, &impl, sizeof(impl)) || !impl) return 0;
+    if (!mem_read(impl, &vt, sizeof(vt)) || !vt) return 0;
+    if (!mem_read((const uint8_t*)vt + 0x10, &body, sizeof(body)) || !body) return 0;
+    const uintptr_t b = (uintptr_t)body;
+    return (g.base && b > g.base && b - g.base < 0x2000000) ? (uint32_t)(b - g.base) : 0;
+}
+
+void note_button(const char* name, uint32_t action, bool house) {
+    char key[64];
+    _snprintf_s(key, sizeof(key), _TRUNCATE, "%s@%08X", name, action);
     for (uint32_t i = 0; i < g.seen_count; ++i)
-        if (strcmp(g.seen[i], name) == 0) return;
-    if (g.seen_count < 96) strncpy_s(g.seen[g.seen_count++], name, _TRUNCATE);
-    log_line_lvl(LogLevel::Trace, "HOUSE", "button pressed: '%s'", name);
+        if (strcmp(g.seen[i], key) == 0) return;
+    if (g.seen_count < 96) strncpy_s(g.seen[g.seen_count++], key, _TRUNCATE);
+    // Info while in the House: these lines are how the guest blocklist is built.
+    log_line_lvl(house ? LogLevel::Info : LogLevel::Trace, "HOUSE",
+                 "button pressed: '%s' action %08X", name, action);
 }
 
 void __fastcall h_click(void* button, bool force) {
     char name[48] = {};
     if (button && mem_read_std_string((const uint8_t*)button + kButton_Name, name, sizeof(name))) {
-        note_button(name);
-        if (is_guest() && leave_scene_live("House")) {
+        const bool house  = leave_scene_live("House");
+        const uint32_t act = button_action(button);
+        note_button(name, act, house);
+        if (is_guest() && house) {
             for (const char* p : kGuestBlockedButtons) {
                 if (strncmp(name, p, strlen(p)) == 0) {
                     set_toast("The guest can only look around -- the host does the buying and building.");
                     return;
+                }
+            }
+            if (act && resolve_is_pinned_build()) {
+                for (const BlockedAction& b : kGuestBlockedActions) {
+                    if (b.rva == act) { set_toast(b.why); return; }
                 }
             }
         }
@@ -233,8 +279,12 @@ void pump_cursor() {
     if (g.in_house && !g.menu_open) {
         overlay_local_pointer(out.nx, out.ny, out.mode);
     } else {
-        out.nx = -1.0f;   // "hidden" -- see overlay_on_message
-        out.ny = -1.0f;
+        // "Hidden" -- see overlay_on_message. The position stays inside the
+        // decoder's bounds (dec_cursor closes the connection on a wild
+        // fraction), so the marker is the art index instead.
+        out.nx = 0.0f;
+        out.ny = 0.0f;
+        out.mode = kCursorHiddenMode;
     }
     const bool changed = !g.sent_any || out.nx != g.last.nx || out.ny != g.last.ny ||
                          out.mode != g.last.mode;
@@ -283,6 +333,7 @@ void pump_rejoin() {
 void house_install(uintptr_t base) {
     if (g.installed) return;
     g.installed = true;
+    g.base = base;
     hook(function_naming(base, "EndDayTransition"), (void*)&h_end_day, (void**)&g.o_end_day,
          "the End Day transition");
     hook(function_naming(base, "DepartTransition"), (void*)&h_depart, (void**)&g.o_depart,
@@ -290,8 +341,24 @@ void house_install(uintptr_t base) {
     hook(addr_of_call(C_ButtonClick), (void*)&h_click, (void**)&g.o_click, "Button::Click");
 }
 
+void house_note_swap() { ++g.swaps; }
+
 void house_pump() {
     if (++g.frame % 6 == 0) refresh_menu_state();
+
+    // Flicker diagnosis: a game that presents more than once per frame (or
+    // less) explains a panel that blinks. Reported a few times, then quiet.
+    ++g.frames;
+    const uint64_t now = GetTickCount64();
+    if (!g.rate_since) g.rate_since = now;
+    if (now - g.rate_since >= 10000 && g.rate_reports < 6) {
+        log_line("HOUSE", "frame pacing: %u frames, %u swaps in %.1f s (%.2f swaps per frame)",
+                 g.frames, g.swaps, (now - g.rate_since) / 1000.0,
+                 g.frames ? (double)g.swaps / g.frames : 0.0);
+        g.frames = g.swaps = 0;
+        g.rate_since = now;
+        ++g.rate_reports;
+    }
     if (!net_active()) return;
     pump_cursor();
     if (is_guest()) pump_rejoin();

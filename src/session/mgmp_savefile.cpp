@@ -1173,6 +1173,9 @@ void savefile_note_loaded(const void* name) {
     const size_t len = strlen(n);
     if (len < 5 || _stricmp(n + len - 4, ".sav") != 0) return;
     if (_stricmp(n, kCoopSaveName) == 0) return;   // the client's copy, never shared
+    // The main menu loads its own background save (test00.sav) through the
+    // same call; only a campaign slot is a save a player chose.
+    if (!strstr(n, "campaign")) return;
     strncpy_s(g.loaded_name, n, _TRUNCATE);
     g.have_loaded = true;
     log_line("SAVEFILE", "save loaded: '%s'", n);

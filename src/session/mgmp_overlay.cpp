@@ -1433,9 +1433,9 @@ void overlay_on_swap(void* window) {
 void overlay_on_message(uint8_t from, const CursorMsg& c) {
     if (from >= kMaxPeers) return;
     Peer& p = g.peers[from];
-    // Our fork: outside battle a peer sends nx < 0 while it has no menu open,
-    // meaning "hide my pointer" (mgmp_house).
-    if (c.nx < -0.5f) { p.have = false; return; }
+    // Our fork: outside battle a peer sends mode == kCursorHiddenMode while its
+    // pointer should not be shown (mgmp_house).
+    if (c.mode == kCursorHiddenMode) { p.have = false; return; }
     p.nx = c.nx;
     p.ny = c.ny;
     p.mode = c.mode;
