@@ -55,6 +55,7 @@ struct House {
 
     // Menu detection, refreshed every few frames.
     bool     menu_open = false;
+    bool     in_house  = false;
     uint32_t frame = 0;
     uint64_t scene_sig = 0;
 
@@ -226,7 +227,10 @@ void pump_cursor() {
     out.battle_id = 0;
     out.on_board  = 0;
     out.owns_turn = 1;
-    if (g.menu_open) {
+    // Shown only while this player is in the House with no menu open (storage,
+    // a shop, ...). Battles use the HUD path above; everywhere else is hidden.
+    g.in_house = (g.frame % 6 == 0) ? leave_scene_live("House") : g.in_house;
+    if (g.in_house && !g.menu_open) {
         overlay_local_pointer(out.nx, out.ny, out.mode);
     } else {
         out.nx = -1.0f;   // "hidden" -- see overlay_on_message

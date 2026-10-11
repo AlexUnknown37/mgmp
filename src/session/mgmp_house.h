@@ -11,8 +11,8 @@
 //     handoff). The guest's game is driven back through the menu for it: an
 //     Escape key press opens the pause menu, mgmp_leave presses Quit To Menu,
 //     and the auto-Play loads the new save.
-//   * Each player sees the other's mouse outside battle only while that player
-//     has a menu open (storage, a shop, ...). Otherwise it is hidden.
+//   * Each player sees the other's mouse in the House only while that player
+//     has NO menu open (storage, a shop, ...), and in battles. Hidden elsewhere.
 //
 // The two transitions are found at runtime by the string literal each one's
 // AddComponent<T> instantiation names ("EndDayTransition", "DepartTransition"):

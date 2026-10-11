@@ -130,6 +130,7 @@ ever deleted** (by the mod, on either machine).
     must_rejoin + leave armed + `house` posts VK_ESCAPE (down, +80 ms up; max 3, 6 s apart) so the pause menu
     opens and mgmp_leave presses Quit To Menu, then auto-Play reloads.
   - Proto 28: MSG_SYNCREQ (client -> host). CURSOR with nx < 0 = hidden. Outside battle each peer sends its
-    pointer only while a non-base scene is live ("menu open"; base set in kBaseScenes) and the hide sentinel
+    pointer only while in the House with NO non-base scene live (user corrected: hide while a menu is open;
+    only House or battle), base set in kBaseScenes, and the hide sentinel
     otherwise. Scene-set changes logged at Trace ("HOUSE scenes: ...") to learn menu scene names.
   - Known gap: blocking Depart happens after the guest has picked a team (0x3B13F0 continues after the null).
