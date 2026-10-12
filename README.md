@@ -10,8 +10,7 @@ game — their House, their cats, and their adventures.
 This is a fork of **[mgmp by SanTertrust](https://github.com/SanTertrust/mgmp)**
 (MIT), which did the hard part: synchronised battles, shared adventures,
 reconnects and desync detection. This fork adds Mewtator/Mewjector loading, a
-LAN game finder, shared House visits and a shared End Day. Steam join is
-planned.
+LAN game finder, Steam invites, shared House visits and a shared End Day.
 
 It is not an official feature and has nothing to do with the developers of
 Mewgenics. Built with the help of [Claude](https://claude.ai/) (Anthropic's
@@ -54,7 +53,11 @@ and aim preview; rejoin mid-battle; desync detection.
 - **Force Sync** button for the guest: reloads the host's game from scratch.
 - Leaving the House for an adventure (or coming home) brings the guest along.
 
-**Not yet:** Steam join (LAN / direct IP only for now), a live shared House
+- **Steam invites and joining** (new, not yet tested between two PCs): *Host on
+  Steam*, then *Invite friend*, or friends pick *Join Game* in the Steam friends
+  list. No addresses or port forwarding — the connection goes through Steam.
+
+**Not yet:** a live shared House
 (the guest's House is a copy and does not update when the host moves things
 mid-day), 3–4 players.
 
@@ -83,6 +86,14 @@ To test with two copies on one PC, turn on *Allow launching concurrent game
 instances* in Mewtator's settings.
 
 ---
+
+## Playing over Steam
+
+1. **Host:** load your save, press **Host on Steam**, then **Invite friend
+   (Steam overlay)**.
+2. **Guest:** accept the invite (or right-click the host in your Steam friends
+   list and pick **Join Game**). If your game is not running, Steam starts it
+   and the mod joins once it is up. Stay on the main menu; the mod loads you in.
 
 ## Playing over LAN
 
