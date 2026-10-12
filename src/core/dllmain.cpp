@@ -15,6 +15,7 @@
 #include "mgmp_session.h"
 #include "mgmp_ui.h"
 #include "mgmp_lan.h"
+#include "mgmp_steam.h"
 #include "mgmp_house.h"
 
 #include <windows.h>

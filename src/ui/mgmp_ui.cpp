@@ -24,6 +24,7 @@
 #include "mgmp_combatlock.h"
 #include "mgmp_leave.h"
 #include "mgmp_lan.h"
+#include "mgmp_steam.h"
 #include "mgmp_savefile.h"
 #include "mgmp_house.h"
 
@@ -600,11 +601,31 @@ void draw_main() {
         if (busy) ImGui::TextDisabled("starting...");
 
         ImGui::SeparatorText("Steam");
-        ImGui::TextDisabled("Steam join is coming in a later version.");
+        if (steam_available()) {
+            ImGui::BeginDisabled(busy);
+            if (ImGui::Button("Host on Steam")) {
+                lan_stop_search();
+                steam_host((uint16_t)g.port);
+                g.message[0] = 0;
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip("Host for Steam friends: they join through an invite or the "
+                                  "friends list, no addresses or port forwarding needed.");
+            ImGui::TextDisabled("To join: accept a friend's Steam invite, or right-click\n"
+                                "them in your Steam friends list and pick Join Game.");
+        } else {
+            ImGui::TextDisabled("Steam isn't available (start the game through Steam).");
+        }
+        if (steam_status()[0]) ImGui::TextWrapped("%s", steam_status());
     } else {
         const NetRole r = net_role();
         const NetState st = net_state();
-        ImGui::SeparatorText(r == NetRole::Host ? "Hosting on LAN" : "Joined over LAN");
+        const bool via_steam = steam_in_session();
+        ImGui::SeparatorText(r == NetRole::Host ? (via_steam ? "Hosting (Steam + LAN)" : "Hosting on LAN")
+                                                : (via_steam ? "Joined over Steam" : "Joined over LAN"));
+        if (steam_status()[0]) ImGui::TextWrapped("%s", steam_status());
+        if (r == NetRole::Host && steam_hosting() && ImGui::Button("Invite friend (Steam overlay)"))
+            steam_invite();
         ImGui::TextDisabled("Status:");
         ImGui::SameLine();
         ImGui::TextColored(state_colour(st), "%s", state_name(st));
@@ -618,7 +639,7 @@ void draw_main() {
             ImGui::Text("Players: %u", (unsigned)(net_peer_count() ? net_peer_count() : 1));
             ImGui::TextDisabled("Pick your save as usual -- your partner is brought into the same run.");
         } else {
-            ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());
+            if (!via_steam) ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());
             ImGui::TextDisabled("Your own saves are never touched; the host's run is kept in mgmp_coop.sav.");
             ImGui::BeginDisabled(savefile_must_rejoin());
             if (ImGui::Button("Force Sync")) {
@@ -639,7 +660,7 @@ void draw_main() {
                                "HALTED -- the two games disagreed. Open the developer panels for details.");
 
         ImGui::BeginDisabled(busy);
-        if (ImGui::Button("Leave")) { session_request_disconnect(); g.message[0] = 0; }
+        if (ImGui::Button("Leave")) { session_request_disconnect(); steam_leave(); g.message[0] = 0; }
         ImGui::EndDisabled();
     }
 

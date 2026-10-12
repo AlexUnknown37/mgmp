@@ -220,3 +220,17 @@ ever deleted** (by the mod, on either machine).
   - Known limit: identical nights need identical Houses at that moment. The guest's copy is the host's save as
     of the last load, so host changes since then (moved cats, purchases) can make the nights differ. Next step:
     ship the host's live cats/house/inventory with ENDDAY and apply before the roll.
+- 2026-10-11: **Steam invites + joining** (`src/net/mgmp_steam.{h,cpp}`). mgmp_net untouched: a bridge carries
+  mgmp's TCP byte stream over reliable SteamNetworkingMessages (channel 0, 1-byte frame type: 0 data, 1 close).
+  Host: "Host on Steam" = ordinary TCP host + friends-only lobby (CreateLobby, polled with
+  IsAPICallCompleted/GetAPICallResult, LobbyCreated_t 513) + rich presence connect="+connect_lobby <id>";
+  "Invite friend" = ActivateGameOverlayInviteDialog. Each Steam peer gets a loopback TCP connection into the
+  host's own mgmp listener. Guest: GameLobbyJoinRequested_t (333), GameRichPresenceJoinRequested_t (337) or
+  "+connect_lobby" on the command line -> JoinLobby (LobbyEnter_t 504) -> owner = host -> bridge listens on
+  127.0.0.1:<ephemeral> and session_request_join() dials it. Host accepts SteamNetworkingMessagesSessionRequest_t
+  (1251) while hosting. Callbacks via SteamAPI_RegisterCallback with a CCallbackBase-shaped object (MSVC
+  vtable: call-result Run first, then Run, then size); the game calls SteamAPI_RunCallbacks itself. All from
+  the flat API of the game's own steam_api64.dll (Matchmaking v009, Friends v018, User v023, Utils v010,
+  NetworkingMessages v002); initialised lazily on the game thread from steam_pump.
+  - Verified: single copy logs "STEAM ready (Steam id ...)", all hooks live. NOT yet verified: lobby creation,
+    invite overlay, a real join -- needs two Steam accounts on two PCs.
