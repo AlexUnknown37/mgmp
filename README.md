@@ -1,3 +1,6 @@
+# SHE BROKEY!!! Runs dose not sync. This is not playable compared to the Original!
+
+
 # Mewgenics Online — LAN co-op for Mewgenics
 
 > **Very early alpha. A side project.** Expect bugs, back up your saves, and
