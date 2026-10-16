@@ -69,6 +69,7 @@ struct NetMsg {
     HostLeftMsg  hostleft;
     SyncReqMsg   syncreq;
     EndDayMsg    endday;
+    BoxMsg       box;
     HaltMsg   halt;
     char      refuse[192] = {};
 };
@@ -157,6 +158,7 @@ bool net_send_nodehash(const NodeHashMsg& m);
 bool net_send_hostleft(const HostLeftMsg& m);
 bool net_send_syncreq(const SyncReqMsg& m);
 bool net_send_endday(const EndDayMsg& m);
+bool net_send_box(const BoxMsg& m);
 
 // The desync dump. Sent at most once per divergence, so it has no throughput
 // budget to respect and no dedupe to do -- by the time it goes out the run is

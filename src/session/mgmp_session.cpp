@@ -5,6 +5,7 @@
 #include "mgmp_lan.h"
 #include "mgmp_steam.h"
 #include "mgmp_house.h"
+#include "mgmp_box.h"
 #include "mgmp_session.h"
 #include "mgmp_net.h"
 #include "mgmp_catsync.h"
@@ -481,6 +482,7 @@ void session_update() {
     lan_pump();
     steam_pump();
     house_pump();
+    box_pump();
 
     // BEFORE the early return below, deliberately: a Host or Join pressed with
     // no session at all arrives with phase == Off, which is precisely the state

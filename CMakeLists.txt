@@ -54,6 +54,7 @@ add_library(mgmp SHARED
     src/net/mgmp_lan.cpp
     src/net/mgmp_steam.cpp
     src/session/mgmp_house.cpp
+    src/session/mgmp_box.cpp
     src/session/mgmp_lockstep.cpp
     src/session/mgmp_session.cpp
     src/session/mgmp_follow.cpp

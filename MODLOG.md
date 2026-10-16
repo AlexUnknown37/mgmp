@@ -234,3 +234,19 @@ ever deleted** (by the mod, on either machine).
   NetworkingMessages v002); initialised lazily on the game thread from steam_pump.
   - Verified: single copy logs "STEAM ready (Steam id ...)", all hooks live. NOT yet verified: lobby creation,
     invite overlay, a real join -- needs two Steam accounts on two PCs.
+- 2026-10-16: **Run setup, part 1: shared Adventure box** (user: both players may box/unbox cats; only the host
+  starts the run; next both may equip any cat, host wins, desync check corrects the guest, no item may be lost
+  or duplicated; then gameplay sync).
+  - RE: the Adventure box is `glaiel::ButchBox` (a CatPlacementArea; the string "AdventureBox" is only used in
+    its init 0xAD740). vtable 0xEFCCC0: slot 10 0xAE7C0, slot 11 0xAE9D0 (per-frame: walks the 4 slots, sets
+    facing), slot 31 0xAED00 place(box, HouseCat*) -> bool (rules via AEC00; picks a RANDOM free slot with the
+    presentation stream TLS+0x198 -> slot order differs between peers), slot 32 0xAF960 remove(box, HouseCat*)
+    (clears the slot and HouseCat+0x48 -> +0x108/+0x110 link). box+0x100 = HouseCat*[4]; HouseCat+0x80 = cat id.
+    House cats: [[box+0x18]+8] scene, [[scene+0x20]+0x4480] = component list of type id 0x448 (HouseCat; the
+    DeriveComponentWithBoilerplate "$0EEI" = 0x448) {count @0xC, data @0x10} -- same list End Day walks.
+    Departure: 0xAE360 (ButchBox, no direct callers) calls 0x3B13F0 "start adventure with team" twice.
+  - `src/session/mgmp_box.{h,cpp}`, MSG_BOX (proto 30): guest place/remove -> op to host -> host applies with
+    the game's own place/remove; host sends its 4 slots on every change and every 2 s; guest corrects to the
+    host's set and then rewrites the slot array into the host's order. Not yet tested in game.
+  - Next: ActSelectionScreen (vtable 0xF16410 registry; slot 5 0x3C6C40), ClassChooser (registry 0xF165D8),
+    equipment/inventory sync with item conservation, then a shared embark (same team + seed -> same map).

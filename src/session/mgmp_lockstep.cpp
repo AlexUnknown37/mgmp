@@ -18,6 +18,7 @@
 #include "mgmp_choice.h"
 #include "mgmp_savefile.h"
 #include "mgmp_house.h"
+#include "mgmp_box.h"
 #include "mgmp_leave.h"
 #include "mgmp_session.h"
 #include "mgmp_ability.h"
@@ -2127,6 +2128,10 @@ void lockstep_pump() {
 
             case MSG_ENDDAY:
                 house_on_end_day_message(m.endday.seed);
+                break;
+
+            case MSG_BOX:
+                box_on_message(m.from, m.box);
                 break;
 
             // Not epoch-gated, and deliberately so: a cat is RUN state, not
