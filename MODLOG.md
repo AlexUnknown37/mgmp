@@ -279,3 +279,13 @@ ever deleted** (by the mod, on either machine).
   +0x38 transform, +0x48/+0x50 velocity, gravity on +0x50, +0x58/+0x60 last pos, +0x68 "held last frame"; skips
   physics when 0xECF30(cat)->+0x38 == cat). Now hooked: for the remote-carried cat skip it the same way and keep
   +0x58/+0x60/+0x68 current, so on release the game's own code makes the throw and the cat falls normally.
+- 2026-10-16: **Test 12.** Box: one cat landed in TWO slots ("0 105 105 0", "117 105 105 117") -- a guest's add
+  request and the replay of its drop both placed it, and ButchBox::place does not check duplicates, so two cats
+  filled the box. Fix: h_place returns true without placing when the cat is already in a slot; grab/drop
+  replays run with g.applying so they are not echoed as ops (they caused the unbox/rebox flapping).
+  - Host departed -> guest stayed home (shared departure not built yet). RE: 0xAE360 = the departure lambda body
+    (capture: [0] ButchBox*, +8 team vector copied by 0x483A0); sets +0xDC = 1 on each boxed HouseCat;
+    tutorial path 0x3B1680; demo path builds 6 class names and calls 0x3B13F0; normal path: classes =
+    0x1C5CA0(Director+0x5A8, &team), then 0x3B13F0(0x908E0(box), &"<9-char scene>", classes, &team) -> the
+    "Equip Class Collars" screen (ClassChooser). Next: the team vector's element type (from the Depart sign's
+    lambda), then guest follows by running the same departure with its synced box.
