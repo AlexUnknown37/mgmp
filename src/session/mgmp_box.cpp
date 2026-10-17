@@ -19,6 +19,19 @@ namespace {
 
 typedef void (__fastcall* fn_box_update)(void* box);
 typedef bool (__fastcall* fn_box_op)(void* box, void* house_cat);
+typedef void (__fastcall* fn_cm_update)(void* cm);
+typedef void* (__fastcall* fn_get_house)(void* comp);
+typedef void* (__fastcall* fn_area_at)(void* house, const double* point);
+typedef void  (__fastcall* fn_area_cat)(void* area, void* house_cat);
+
+struct Remote {
+    uint64_t cat  = 0;
+    double   x = 0, y = 0;
+    bool     held = false;
+    bool     taken = false;     // removed from its area on our side
+    bool     drop_pending = false;
+    uint64_t at = 0;
+};
 
 constexpr uint32_t  kRva_Update = 0x000AE9D0;
 constexpr uint32_t  kRva_Place  = 0x000AED00;
@@ -42,6 +55,18 @@ struct State {
     uint64_t last_send_at = 0;
     bool     host_dirty = false;     // host: send state at the next pump
 
+    // Carried cats.
+    fn_cm_update o_cm_update = nullptr;
+    fn_get_house get_house = nullptr;
+    fn_area_at   area_at   = nullptr;
+    fn_area_cat  area_add  = nullptr;
+    fn_area_cat  area_remove = nullptr;
+    void*    cm = nullptr;
+    void*    my_held = nullptr;      // what our click manager held last frame
+    uint64_t my_held_id = 0;
+    uint64_t grab_sent_at = 0;
+    double   last_x = 0, last_y = 0;
+    Remote   remote;
     bool     have_host = false;      // guest: latest host state
     bool     apply_pending = false;  // guest: a host state arrived and is not applied yet
     uint64_t local_change_at = 0;    // guest: our own last place/remove
@@ -75,6 +100,136 @@ void read_slots(void* box, uint64_t (&ids)[kSlots]) {
 }
 
 // The House's HouseCat with this cat id, or null.
+void* find_house_cat(void* box, uint64_t id);
+
+// --- carried cats --------------------------------------------------------
+
+constexpr uintptr_t kCM_Held       = 0x38;
+constexpr uintptr_t kCat_Transform = 0x40;
+constexpr uintptr_t kCat_Area      = 0xE8;
+constexpr uintptr_t kCat_HeldArt   = 0x50;   // renderer shown while carried
+constexpr uintptr_t kCat_NormalArt = 0x58;   // renderer shown otherwise
+
+bool cat_pos(void* hc, double& x, double& y) {
+    const uint8_t* t = nullptr;
+    if (!mem_read((const uint8_t*)hc + kCat_Transform, &t, sizeof(t)) || !t) return false;
+    return mem_read(t + 0x80, &x, 8) && mem_read(t + 0x88, &y, 8);
+}
+
+void set_cat_pos(void* hc, double x, double y) {
+    uint8_t* t = nullptr;
+    if (!mem_read((const uint8_t*)hc + kCat_Transform, &t, sizeof(t)) || !t) return;
+    const double z = 0.0;
+    memcpy(t + 0x80, &x, 8);
+    memcpy(t + 0x88, &y, 8);
+    memcpy(t + 0x90, &z, 8);
+}
+
+void set_held_art(void* hc, bool held) {
+    for (int k = 0; k < 2; ++k) {
+        uint8_t* r = nullptr;
+        if (mem_read((const uint8_t*)hc + (k ? kCat_NormalArt : kCat_HeldArt), &r, sizeof(r)) && r)
+            r[0x51] = (uint8_t)(k ? !held : held);
+    }
+}
+
+// The point the game tests for an area on drop: transform position plus the
+// cat's scaled drop offset (0x1FF140).
+void drop_point(void* hc, double* pt) {
+    const uint8_t* t = nullptr;
+    const uint8_t* c = nullptr;
+    double x = 0, y = 0, sx = 0, sy = 0, ox = 0, oy = 0;
+    if (mem_read((const uint8_t*)hc + kCat_Transform, &t, sizeof(t)) && t &&
+        mem_read((const uint8_t*)hc + 0x100, &c, sizeof(c)) && c &&
+        mem_read(t + 0x80, &x, 8) && mem_read(t + 0x88, &y, 8) &&
+        mem_read(t + 0x98, &sx, 8) && mem_read(t + 0xA0, &sy, 8) &&
+        mem_read(c + 0xC8, &ox, 8) && mem_read(c + 0xD0, &oy, 8)) {
+        pt[0] = x + sx * ox;
+        pt[1] = y + sy * oy;
+    } else {
+        cat_pos(hc, pt[0], pt[1]);
+    }
+}
+
+void send_grab(uint64_t id, void* hc, bool held) {
+    GrabMsg m{};
+    m.cat  = id;
+    m.held = held ? 1 : 0;
+    if (!cat_pos(hc, m.x, m.y)) return;
+    if (net_send_grab(m)) { g.grab_sent_at = GetTickCount64(); g.last_x = m.x; g.last_y = m.y; }
+}
+
+// Ours: report what our player carries.
+void publish_my_grab(void* cm) {
+    void* held = nullptr;
+    mem_read((const uint8_t*)cm + kCM_Held, &held, sizeof(held));
+    if (held != g.my_held) {
+        if (g.my_held && g.my_held_id) {
+            // Released (or swapped): the cat is where the game just dropped it.
+            send_grab(g.my_held_id, g.my_held, false);
+            log_line_lvl(LogLevel::Trace, "BOX", "dropped cat %llu", (unsigned long long)g.my_held_id);
+        }
+        g.my_held    = held;
+        g.my_held_id = held ? cat_id(held) : 0;
+        if (held) send_grab(g.my_held_id, held, true);
+        return;
+    }
+    if (held && GetTickCount64() - g.grab_sent_at >= 50) {
+        double x = 0, y = 0;
+        if (cat_pos(held, x, y) && (x != g.last_x || y != g.last_y || GetTickCount64() - g.grab_sent_at >= 500))
+            send_grab(g.my_held_id, held, true);
+    }
+}
+
+// Theirs: show the cat the other player carries, and replay their drop.
+void apply_remote_grab(void* cm) {
+    Remote& r = g.remote;
+    if (!r.cat) return;
+    void* hc = find_house_cat(cm, r.cat);
+    if (!hc) return;
+    void* mine = nullptr;
+    mem_read((const uint8_t*)cm + kCM_Held, &mine, sizeof(mine));
+    if (mine == hc) { r.held = false; r.drop_pending = false; r.cat = 0; return; }   // we have it now
+
+    if (r.held) {
+        if (!r.taken) {
+            // Out of whatever it was in (box, room) -- as the game does on pick-up.
+            void* area = nullptr;
+            mem_read((const uint8_t*)hc + kCat_Area, &area, sizeof(area));
+            if (area) {
+                g.area_remove(area, hc);
+                void* none = nullptr;
+                memcpy((uint8_t*)hc + kCat_Area, &none, 8);
+            }
+            r.taken = true;
+        }
+        set_cat_pos(hc, r.x, r.y);
+        set_held_art(hc, true);
+        if (GetTickCount64() - r.at > 3000) { r.held = false; r.drop_pending = true; }   // lost the stream
+        return;
+    }
+    if (r.drop_pending) {
+        r.drop_pending = false;
+        set_cat_pos(hc, r.x, r.y);
+        set_held_art(hc, false);
+        double pt[2];
+        drop_point(hc, pt);
+        if (void* house = g.get_house(cm)) {
+            if (void* area = g.area_at(house, pt)) g.area_add(area, hc);
+        }
+        r.cat = 0;
+        r.taken = false;
+    }
+}
+
+void __fastcall h_cm_update(void* cm) {
+    g.o_cm_update(cm);
+    g.cm = cm;
+    if (!net_active() || !session_ready()) return;
+    publish_my_grab(cm);
+    apply_remote_grab(cm);
+}
+
 void* find_house_cat(void* box, uint64_t id) {
     if (!id) return nullptr;
     const uint8_t* comp  = nullptr;
@@ -229,6 +384,22 @@ void box_install(uintptr_t base) {
         hook(checked(base, kRva_Place,  b_place,  sizeof(b_place)),  (void*)&h_place,  (void**)&g.o_place,  "ButchBox::place") &&
         hook(checked(base, kRva_Remove, b_remove, sizeof(b_remove)), (void*)&h_remove, (void**)&g.o_remove, "ButchBox::remove");
     if (ok) log_line_lvl(LogLevel::Trace, "BOX", "shared Adventure box hooks live");
+
+    // Carried cats: the click manager update, plus the drop/pick-up helpers.
+    const uint8_t b_cm[]    = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x18, 0x55, 0x56, 0x57 };
+    const uint8_t b_house[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20 };
+    const uint8_t b_at[]    = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18 };
+    const uint8_t b_add[]   = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10 };
+    const uint8_t b_rem[]   = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20 };
+    g.get_house   = (fn_get_house)checked(base, 0x0ECC30, b_house, sizeof(b_house));
+    g.area_at     = (fn_area_at)checked(base, 0x1E6460, b_at, sizeof(b_at));
+    g.area_add    = (fn_area_cat)checked(base, 0x2E88D0, b_add, sizeof(b_add));
+    g.area_remove = (fn_area_cat)checked(base, 0x2E89C0, b_rem, sizeof(b_rem));
+    if (g.get_house && g.area_at && g.area_add && g.area_remove)
+        hook(checked(base, 0x1FE940, b_cm, sizeof(b_cm)), (void*)&h_cm_update, (void**)&g.o_cm_update,
+             "HouseCatClickManager::update");
+    else
+        log_line_lvl(LogLevel::Warn, "BOX", "!! a drop helper did not verify -- carried cats are not shared");
 }
 
 void box_pump() {
@@ -250,6 +421,18 @@ void box_pump() {
         g.apply_pending = false;
         apply_host_state(box);
     }
+}
+
+void box_on_grab(uint8_t from, const GrabMsg& m) {
+    (void)from;
+    Remote& r = g.remote;
+    if (r.cat && r.cat != m.cat && r.held) r.drop_pending = true;   // a new cat: the old one was let go
+    r.cat  = m.cat;
+    r.x    = m.x;
+    r.y    = m.y;
+    r.at   = GetTickCount64();
+    if (m.held) { if (!r.held) r.taken = false; r.held = true; }
+    else        { r.held = false; r.drop_pending = true; }
 }
 
 void box_on_message(uint8_t from, const BoxMsg& m) {

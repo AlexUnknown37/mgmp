@@ -257,3 +257,16 @@ ever deleted** (by the mod, on either machine).
   Fix: the host's first save publish waits while an adventure is loaded and the host is not on the map
   (`follow_on_map()`); UI tells the host "your partner joins when you're back on the map". Box hooks were not
   exercised in this session.
+- 2026-10-16: **Carried cats** (user: when a player grabs a cat the other must see it; lets either player pick
+  their cat and put it in the box). RE of HouseCatClickManager::update 0x1FE940 (registry vtable 0xF10448
+  slot 10): +0x38 = carried HouseCat (set on press from the nearest cat; pick-up plays an anim, calls
+  0x2E89C0([cat+0xE8], cat) to leave its area, clears +0xE8, +0xF8 += 100000 draw order); while carried
+  [cat+0x50]->+0x51 = 1 (held art) and [cat+0x58]->+0x51 = 0, transform [cat+0x40] +0x80/+0x88 = mouse world
+  pos; release 0x1FF140: point = pos + transform scale (+0x98/+0xA0) * [cat+0x100] offset (+0xC8/+0xD0),
+  House = 0xECC30(cm) (component type 0x446), area = 0x1E6460(House, &point), 0x2E88D0(area, cat).
+  0x2E89C0/0x2E88D0 = CatPlacementArea remove/add (call the area's own virtual: box -> AF960/AED00).
+  - MSG_GRAB (proto 31) {cat, world x, y, held}: sender hooks the click-manager update (after original) and
+    streams the carried cat at <=20 Hz + a final held=0. Receiver (same hook): takes the cat out of its area
+    once, writes its transform + held art each frame, and on release replays the drop through 0x1E6460 +
+    0x2E88D0 -- so a drop into the box goes through the box hooks and the box sync. A cat the local player
+    grabs wins over the remote. Stream timeout 3 s -> dropped. Untested.

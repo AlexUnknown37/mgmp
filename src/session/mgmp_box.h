@@ -27,9 +27,19 @@
 namespace mgmp {
 
 struct BoxMsg;
+struct GrabMsg;
 
 void box_install(uintptr_t base);
 void box_pump();                       // once per frame (session_update)
 void box_on_message(uint8_t from, const BoxMsg& m);
+
+// Carried cats (MSG_GRAB). The House click manager (glaiel::HouseCatClickManager,
+// update = 0x1FE940) keeps the carried HouseCat at +0x38 and moves its transform
+// ([cat+0x40] +0x80/+0x88) to the mouse every frame. The other game shows the
+// same cat held at the same world position, and on release replays the drop the
+// way 0x1FF140 does: House = 0xECC30(comp), area = 0x1E6460(House, &point),
+// 0x2E88D0(area, cat) -- so a cat dropped into the box lands in the box on both.
+// Picking up takes the cat out of its area first: 0x2E89C0([cat+0xE8], cat).
+void box_on_grab(uint8_t from, const GrabMsg& m);
 
 } // namespace mgmp

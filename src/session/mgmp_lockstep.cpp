@@ -2134,6 +2134,10 @@ void lockstep_pump() {
                 box_on_message(m.from, m.box);
                 break;
 
+            case MSG_GRAB:
+                box_on_grab(m.from, m.grab);
+                break;
+
             // Not epoch-gated, and deliberately so: a cat is RUN state, not
             // battle state. It stays true across a battle boundary, so a late
             // one is still correct -- unlike an ACTION, which means nothing

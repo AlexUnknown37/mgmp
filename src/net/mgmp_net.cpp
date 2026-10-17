@@ -170,6 +170,7 @@ bool decode_into(const uint8_t* buf, uint32_t len, NetMsg& m) {
         case MSG_SYNCREQ:   return dec_syncreq(r, m.syncreq);
         case MSG_ENDDAY:    return dec_endday(r, m.endday);
         case MSG_BOX:       return dec_box(r, m.box);
+        case MSG_GRAB:      return dec_grab(r, m.grab);
         case MSG_PEERS:   return dec_peers(r, m.peers);
         case MSG_HALT:    return dec_halt(r, m.halt);
         case MSG_REFUSE:  r.str(m.refuse, sizeof(m.refuse)); return r.ok;
@@ -657,6 +658,7 @@ bool net_send_hostleft(const HostLeftMsg& m) { MGMP_SEND_WITH(enc_hostleft, m); 
 bool net_send_syncreq(const SyncReqMsg& m)   { MGMP_SEND_WITH(enc_syncreq, m); }
 bool net_send_endday(const EndDayMsg& m)     { MGMP_SEND_WITH(enc_endday, m); }
 bool net_send_box(const BoxMsg& m)           { MGMP_SEND_WITH(enc_box, m); }
+bool net_send_grab(const GrabMsg& m)         { MGMP_SEND_WITH(enc_grab, m); }
 bool net_send_refuse (const char* reason) { MGMP_SEND_WITH(enc_refuse,  reason); }
 
 #undef MGMP_SEND_WITH
