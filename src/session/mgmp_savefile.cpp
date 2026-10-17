@@ -274,6 +274,8 @@ struct State {
     // whatever the role. Lets a player who loaded their save (and is standing
     // in the House) BEFORE pressing Host still share it -- have_slot alone is
     // only ever set by a click on the save screen.
+    bool     said_wait_map    = false;
+    bool     host_waiting_map = false;   // a guest waits for us to finish a node
     bool     have_loaded     = false;
     char     loaded_name[64] = {};
     // HOUSE <-> ADVENTURE HANDOFF. The House is not replicated, so when the
@@ -831,6 +833,23 @@ void savefile_pump() {
     // Retried rather than attempted once, because the file may not exist yet:
     // starting a NEW game means the click names a slot the game has not written
     // to disk. Once a second is often enough for a transfer that happens once.
+    // NOT FROM INSIDE A NODE (our fork). A host that is already in a battle or
+    // an event when the guest connects cannot catch it up: the moves made
+    // before the session existed were never recorded, so the guest would load
+    // the last checkpoint and start that battle from turn 0 while the host is
+    // on turn 1 -- measured 2026-10-16, a turn-0 rng mismatch and a HALT. The
+    // file on disk is only exact on the map, so wait until the host is back
+    // there (the guest stays on the menu meanwhile).
+    if (adventure_is_loaded_impl() && !follow_on_map()) {
+        if (!g.said_wait_map) {
+            g.said_wait_map = true;
+            log_line_lvl(LogLevel::Warn, "SAVEFILE", "the host is inside a battle or event -- the "
+                         "guest will be brought in when the host is back on the map");
+        }
+        g.host_waiting_map = true;
+        return;
+    }
+    g.host_waiting_map = false;
     if (++g.publish_tries % 60 != 1) return;
 
     // fresh = true: the only way g.have_slot is set is savefile_on_slot_click,
@@ -1164,6 +1183,8 @@ bool savefile_request_sync() {
                             : "!! could not send the force-sync request");
     return ok;
 }
+
+bool savefile_host_waiting_for_map() { return g.on && !g.is_client && g.host_waiting_map; }
 
 bool savefile_must_rejoin() { return g.on && g.is_client && g.must_rejoin; }
 

@@ -637,6 +637,9 @@ void draw_main() {
             ImGui::TextWrapped("Your LAN address: %s  (port %u)", addrs, (unsigned)net_port());
             ImGui::TextDisabled("Your partner can press \"Find LAN games\", or type the first address.");
             ImGui::Text("Players: %u", (unsigned)(net_peer_count() ? net_peer_count() : 1));
+            if (savefile_host_waiting_for_map())
+                ImGui::TextColored(level_colour(LogLevel::Warn),
+                                   "You're in a fight or event -- your partner joins when you're back on the map.");
             ImGui::TextDisabled("Pick your save as usual -- your partner is brought into the same run.");
         } else {
             if (!via_steam) ImGui::Text("Host: %s:%u", g.addr, (unsigned)net_port());

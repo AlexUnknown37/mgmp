@@ -250,3 +250,10 @@ ever deleted** (by the mod, on either machine).
     host's set and then rewrites the slot array into the host's order. Not yet tested in game.
   - Next: ActSelectionScreen (vtable 0xF16410 registry; slot 5 0x3C6C40), ClassChooser (registry 0xF165D8),
     equipment/inventory sync with item conservation, then a shared embark (same team + seed -> same map).
+- 2026-10-16: **"Runs don't sync" (user README note) -- cause found in test 10.** The host had picked its slot and
+  was already in a battle (tutorial-style battle id 0) and played turn 1 BEFORE pressing Host; the guest then
+  joined, loaded the last checkpoint and started that battle at turn 0 -> turn-0 rng mismatch 511d652f/f1af28ac,
+  HALT. Moves made before the session existed are never recorded, so mgmp's mid-fight catch-up cannot help.
+  Fix: the host's first save publish waits while an adventure is loaded and the host is not on the map
+  (`follow_on_map()`); UI tells the host "your partner joins when you're back on the map". Box hooks were not
+  exercised in this session.

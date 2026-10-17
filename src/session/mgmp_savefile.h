@@ -113,6 +113,10 @@ void savefile_note_loaded(const void* name);
 // to go back through the menu to follow. The UI shows a banner while true.
 bool savefile_must_rejoin();
 
+// Host: a guest is connected but we are inside a battle/event, so it joins
+// when we are back on the map.
+bool savefile_host_waiting_for_map();
+
 // Host: End Day was pressed (from mgmp_house). Sends the new day once written.
 void savefile_on_end_day();
 // Host: a client pressed Force Sync.
