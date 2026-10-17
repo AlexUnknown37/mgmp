@@ -201,7 +201,9 @@ void apply_remote_grab(void* cm) {
             void* area = nullptr;
             mem_read((const uint8_t*)hc + kCat_Area, &area, sizeof(area));
             if (area) {
+                g.applying = true;           // a replay, not our player's change
                 g.area_remove(area, hc);
+                g.applying = false;
                 void* none = nullptr;
                 memcpy((uint8_t*)hc + kCat_Area, &none, 8);
             }
@@ -221,7 +223,11 @@ void apply_remote_grab(void* cm) {
         double pt[2];
         drop_point(hc, pt);
         if (void* house = g.get_house(cm)) {
-            if (void* area = g.area_at(house, pt)) g.area_add(area, hc);
+            if (void* area = g.area_at(house, pt)) {
+                g.applying = true;           // a replay; the host's state update follows
+                g.area_add(area, hc);
+                g.applying = false;
+            }
         }
         r.cat = 0;
         r.taken = false;
@@ -356,6 +362,16 @@ void __fastcall h_update(void* box) {
 }
 
 bool __fastcall h_place(void* box, void* hc) {
+    // The game does not check for a cat already in the box, and two of our
+    // paths (a guest's add request and the replay of its drop) can both place
+    // the same cat -- test 2026-10-16 showed one cat in two slots, which filled
+    // the box after two cats. Already there = already done.
+    {
+        uint64_t ids[kSlots];
+        read_slots(box, ids);
+        const uint64_t id = cat_id(hc);
+        if (id && contains(ids, id)) return true;
+    }
     const bool ok = g.o_place(box, hc);
     if (ok && !g.applying) {
         if (is_host()) g.host_dirty = true;
