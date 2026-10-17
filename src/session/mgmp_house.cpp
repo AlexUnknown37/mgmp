@@ -545,25 +545,49 @@ void house_install(uintptr_t base) {
 void house_note_swap() { ++g.swaps; }
 
 void house_on_button_update(void* button) {
-    if (!g.end_day_pending || !button || !g.o_click) return;
+    // (Pressing the End Day sign from here played its click sound every frame and
+    // never ended the day -- test 2026-10-16. house_do_end_day replaced it.)
+    (void)button;
+}
+
+bool house_end_day_pending() {
+    if (!g.end_day_pending) return false;
     if (GetTickCount64() - g.end_day_since > 20000) {
         g.end_day_pending = false;
-        log_line_lvl(LogLevel::Warn, "HOUSE", "!! could not press End Day for 20 s -- use Force Sync");
+        log_line_lvl(LogLevel::Warn, "HOUSE", "!! could not start End Day for 20 s -- use Force Sync");
+        return false;
+    }
+    return true;
+}
+
+void house_do_end_day(void* house) {
+    if (!g.end_day_pending || !house || !g.o_end_day || !g.base) return;
+    // The House component's scene, checked by name before anything is created.
+    void* scene = nullptr;
+    char name[32] = {};
+    if (!mem_read((const uint8_t*)house + 0x20, &scene, sizeof(scene)) || !scene ||
+        !mem_read_std_string((const uint8_t*)scene + 1208, name, sizeof(name)) || strcmp(name, "House") != 0)
+        return;   // not ready (a transition, a menu): try next frame
+    uint8_t dying = 0;
+    if (mem_read((const uint8_t*)scene + 0x4B0, &dying, 1) && dying) return;
+
+    g.end_day_pending = false;
+    typedef void* (__fastcall* fn_new_entity)(void* scene);
+    const uint8_t want[] = { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x80, 0xB9, 0xB0, 0x04 };
+    uint8_t got[sizeof(want)] = {};
+    const uintptr_t at = g.base + 0x96B3E0;
+    if (!resolve_is_pinned_build() || !mem_read((const void*)at, got, sizeof(got)) ||
+        memcmp(got, want, sizeof(want)) != 0) {
+        log_line_lvl(LogLevel::Warn, "HOUSE", "!! cannot start End Day on this build -- use Force Sync");
         return;
     }
-    char name[48] = {};
-    if (!mem_read_std_string((const uint8_t*)button + kButton_Name, name, sizeof(name))) return;
-    if (strcmp(name, "EndDay_Sign") != 0) return;
-    // A real click, from the same spot in the frame the game clicks from.
-    g.end_day_pending = false;
-    g.allow_end_day   = true;
-    log_line("HOUSE", "the host ended the day -- pressing our End Day sign");
-    g.o_click(button, false);
-    if (g.allow_end_day) {
-        // The click was refused (a menu open, the sign busy): try again.
-        g.allow_end_day   = false;
-        g.end_day_pending = true;
-    }
+    void* entity = ((fn_new_entity)at)(scene);
+    void* cap = house;
+    g.allow_end_day = true;
+    log_line("HOUSE", "the host ended the day -- ending ours with the same seed");
+    void* r = g.o_end_day(scene, entity, nullptr, &cap);
+    g.allow_end_day = false;
+    if (!r) log_line_lvl(LogLevel::Warn, "HOUSE", "!! the game did not start End Day -- use Force Sync");
 }
 
 void house_on_end_day_message(uint64_t seed) {

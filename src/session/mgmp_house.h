@@ -47,6 +47,14 @@ void house_on_button_update(void* button);
 // seed the night from `seed`.
 void house_on_end_day_message(uint64_t seed);
 
+// Guest: an End Day from the host is waiting to be started (from mgmp_box's
+// House click-manager update, i.e. inside the scene update).
+bool house_end_day_pending();
+// Starts the guest's End Day: the same AddComponent<EndDayTransition> the sign
+// uses (0x1F77F0), on the House component's scene, with the House as the
+// captured component the completion reads (+0x20 scene, +0x28 director).
+void house_do_end_day(void* house);
+
 // One line for the UI ("" when nothing to say): why a guest click was refused.
 const char* house_toast();
 

@@ -8,6 +8,7 @@
 #include "mgmp_resolve.h"
 #include "mgmp_session.h"
 #include "mgmp_leave.h"
+#include "mgmp_house.h"
 
 #include "MinHook.h"
 
@@ -20,6 +21,7 @@ namespace {
 typedef void (__fastcall* fn_box_update)(void* box);
 typedef bool (__fastcall* fn_box_op)(void* box, void* house_cat);
 typedef void (__fastcall* fn_cm_update)(void* cm);
+typedef void (__fastcall* fn_phys_update)(void* phys);
 typedef void* (__fastcall* fn_get_house)(void* comp);
 typedef void* (__fastcall* fn_area_at)(void* house, const double* point);
 typedef void  (__fastcall* fn_area_cat)(void* area, void* house_cat);
@@ -62,6 +64,8 @@ struct State {
     fn_area_cat  area_add  = nullptr;
     fn_area_cat  area_remove = nullptr;
     void*    cm = nullptr;
+    fn_phys_update o_phys = nullptr;
+    void*    remote_hc = nullptr;    // the HouseCat the other player carries, on our side
     void*    my_held = nullptr;      // what our click manager held last frame
     uint64_t my_held_id = 0;
     uint64_t grab_sent_at = 0;
@@ -189,7 +193,7 @@ void apply_remote_grab(void* cm) {
     if (!hc) return;
     void* mine = nullptr;
     mem_read((const uint8_t*)cm + kCM_Held, &mine, sizeof(mine));
-    if (mine == hc) { r.held = false; r.drop_pending = false; r.cat = 0; return; }   // we have it now
+    if (mine == hc) { r.held = false; r.drop_pending = false; r.cat = 0; g.remote_hc = nullptr; return; }   // we have it now
 
     if (r.held) {
         if (!r.taken) {
@@ -205,11 +209,13 @@ void apply_remote_grab(void* cm) {
         }
         set_cat_pos(hc, r.x, r.y);
         set_held_art(hc, true);
+        g.remote_hc = hc;
         if (GetTickCount64() - r.at > 3000) { r.held = false; r.drop_pending = true; }   // lost the stream
         return;
     }
     if (r.drop_pending) {
         r.drop_pending = false;
+        g.remote_hc = nullptr;   // physics takes the cat back: it falls from here
         set_cat_pos(hc, r.x, r.y);
         set_held_art(hc, false);
         double pt[2];
@@ -222,10 +228,37 @@ void apply_remote_grab(void* cm) {
     }
 }
 
+// HouseCatPhysics::update (0x1FF3F0; phys+0x40 = its HouseCat, phys+0x38 = the
+// transform). The game skips a cat's physics while the click manager holds it
+// (`[cm+0x38] == cat`); a cat the OTHER player carries is not held here, so
+// gravity would pull it down between position updates. Skip it the same way,
+// and keep +0x58/+0x60 (last position) and +0x68 ("was held") current, so on
+// release the game's own code turns the last movement into the throw.
+void __fastcall h_phys_update(void* phys) {
+    void* hc = nullptr;
+    if (g.remote_hc && mem_read((const uint8_t*)phys + 0x40, &hc, sizeof(hc)) && hc == g.remote_hc) {
+        uint8_t* p = (uint8_t*)phys;
+        const uint8_t* t = nullptr;
+        if (mem_read(p + 0x38, &t, sizeof(t)) && t) {
+            memcpy(p + 0x58, t + 0x80, 8);
+            memcpy(p + 0x60, t + 0x88, 8);
+        }
+        const double zero = 0.0;
+        memcpy(p + 0x48, &zero, 8);
+        memcpy(p + 0x50, &zero, 8);
+        p[0x68] = 1;
+        return;
+    }
+    g.o_phys(phys);
+}
+
 void __fastcall h_cm_update(void* cm) {
     g.o_cm_update(cm);
     g.cm = cm;
     if (!net_active() || !session_ready()) return;
+    // The guest's End Day, started from inside the House update.
+    if (house_end_day_pending())
+        if (void* house = g.get_house(cm)) house_do_end_day(house);
     publish_my_grab(cm);
     apply_remote_grab(cm);
 }
@@ -395,11 +428,15 @@ void box_install(uintptr_t base) {
     g.area_at     = (fn_area_at)checked(base, 0x1E6460, b_at, sizeof(b_at));
     g.area_add    = (fn_area_cat)checked(base, 0x2E88D0, b_add, sizeof(b_add));
     g.area_remove = (fn_area_cat)checked(base, 0x2E89C0, b_rem, sizeof(b_rem));
-    if (g.get_house && g.area_at && g.area_add && g.area_remove)
+    if (g.get_house && g.area_at && g.area_add && g.area_remove) {
         hook(checked(base, 0x1FE940, b_cm, sizeof(b_cm)), (void*)&h_cm_update, (void**)&g.o_cm_update,
              "HouseCatClickManager::update");
-    else
+        const uint8_t b_phys[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x81, 0xEC, 0x80 };
+        hook(checked(base, 0x1FF3F0, b_phys, sizeof(b_phys)), (void*)&h_phys_update, (void**)&g.o_phys,
+             "HouseCatPhysics::update");
+    } else {
         log_line_lvl(LogLevel::Warn, "BOX", "!! a drop helper did not verify -- carried cats are not shared");
+    }
 }
 
 void box_pump() {

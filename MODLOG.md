@@ -270,3 +270,12 @@ ever deleted** (by the mod, on either machine).
     once, writes its transform + held art each frame, and on release replays the drop through 0x1E6460 +
     0x2E88D0 -- so a drop into the box goes through the box hooks and the box sync. A cat the local player
     grabs wins over the remote. Stream timeout 3 s -> dropped. Untested.
+- 2026-10-16: **Test 11.** (a) Guest End Day: o_click on 'EndDay_Sign' from Button::update never reached the
+  EndDayTransition creator, and the retry-every-frame played the button's click sound each frame (the "loud
+  constant sound"). Replaced by a direct start: from the House click-manager update, scene = House+0x20
+  (checked: name "House", not dying), entity = 0x96B3E0(scene) (Scene::CreateEntity), then
+  AddComponent<EndDayTransition>(scene, entity, 0, &House) -- the completion's capture is a component with
+  +0x20 scene / +0x28 director. (b) Remote-carried cat sank: HouseCatPhysics::update 0x1FF3F0 (phys+0x40 cat,
+  +0x38 transform, +0x48/+0x50 velocity, gravity on +0x50, +0x58/+0x60 last pos, +0x68 "held last frame"; skips
+  physics when 0xECF30(cat)->+0x38 == cat). Now hooked: for the remote-carried cat skip it the same way and keep
+  +0x58/+0x60/+0x68 current, so on release the game's own code makes the throw and the cat falls normally.
